@@ -209,3 +209,95 @@ def test_run_cli_honors_previous_cancel_request(monkeypatch: pytest.MonkeyPatch)
 
     with pytest.raises(ExecutionAborted):
         executor.run_cli("tool", "payload")
+
+
+def test_run_cli_rejects_input_above_configured_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui, max_input_chars=4)
+
+    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
+        raise AssertionError("Popen should not be called when input is above limit.")
+
+    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+
+    with pytest.raises(CommandError, match="Input acima do limite"):
+        executor.run_cli("tool", "12345")
+
+    assert len(ui.errors) == 1
+    assert "limite configurado" in ui.errors[0]
+
+
+def test_run_cli_truncates_output_above_configured_limit_without_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ui = DummyUI()
+    executor = Executor(ui, max_output_chars=6)
+    process = FakeProcess(stdout_lines=["1234\n", "5678\n"])
+    _patch_popen(monkeypatch, process)
+
+    output = executor.run_cli("tool", "payload")
+
+    assert "saída truncada" in output
+    assert output.endswith("5678")
+    assert ui.errors == []
+
+
+def test_run_cli_allows_per_call_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui, max_input_chars=10, max_output_chars=10)
+
+    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
+        raise AssertionError("Popen should not be called when per-call input limit is exceeded.")
+
+    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+
+    with pytest.raises(CommandError, match="Input acima do limite"):
+        executor.run_cli("tool", "12345", max_input_chars=4)
+
+
+def test_run_cli_rejects_invalid_per_call_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+
+    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
+        raise AssertionError("Popen should not be called when limits are invalid.")
+
+    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+
+    with pytest.raises(CommandError, match="max_input_chars inválido"):
+        executor.run_cli("tool", "payload", max_input_chars=0)
+
+    with pytest.raises(CommandError, match="max_output_chars inválido"):
+        executor.run_cli("tool", "payload", max_output_chars=0)
+
+
+def test_executor_rejects_non_positive_limits() -> None:
+    with pytest.raises(ValueError, match="max_input_chars"):
+        Executor(DummyUI(), max_input_chars=0)
+
+    with pytest.raises(ValueError, match="max_output_chars"):
+        Executor(DummyUI(), max_output_chars=0)
+
+
+def test_executor_rejects_invalid_limit_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COUNCIL_MAX_INPUT_CHARS", "0")
+    with pytest.raises(ValueError, match="COUNCIL_MAX_INPUT_CHARS"):
+        Executor(DummyUI())
+
+    monkeypatch.delenv("COUNCIL_MAX_INPUT_CHARS", raising=False)
+    monkeypatch.setenv("COUNCIL_MAX_OUTPUT_CHARS", "abc")
+    with pytest.raises(ValueError, match="COUNCIL_MAX_OUTPUT_CHARS"):
+        Executor(DummyUI())
+
+
+def test_run_cli_rejects_invalid_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+
+    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
+        raise AssertionError("Popen should not be called when timeout is invalid.")
+
+    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+
+    with pytest.raises(CommandError, match="Timeout inválido"):
+        executor.run_cli("tool", "payload", timeout=0)
