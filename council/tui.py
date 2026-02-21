@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from contextlib import contextmanager
 
 from rich.panel import Panel
@@ -94,6 +95,8 @@ class CouncilTextualApp(App[None]):
     BINDINGS = [
         ("ctrl+r", "run_flow", "Executar"),
         ("ctrl+l", "clear_logs", "Limpar Logs"),
+        ("ctrl+1", "copy_stream", "Copiar Stream"),
+        ("ctrl+2", "copy_results", "Copiar Resultados"),
     ]
 
     CSS = """
@@ -108,7 +111,7 @@ class CouncilTextualApp(App[None]):
     }
 
     .label {
-        margin: 0 0 1 0;
+        margin: 0;
         text-style: bold;
     }
 
@@ -146,6 +149,15 @@ class CouncilTextualApp(App[None]):
         height: 1fr;
     }
 
+    .log_header {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .copy_btn {
+        margin-left: 1;
+    }
+
     #status {
         height: 3;
         padding: 0 1;
@@ -177,6 +189,8 @@ class CouncilTextualApp(App[None]):
         self._awaiting_feedback = False
         self._feedback_event = threading.Event()
         self._feedback_value: str | None = None
+        self._stream_buffer: list[str] = []
+        self._result_buffer: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -200,11 +214,15 @@ class CouncilTextualApp(App[None]):
 
         with Horizontal(id="logs"):
             with Vertical(classes="log_col"):
-                yield Static("Stream em tempo real", classes="label")
+                with Horizontal(classes="log_header"):
+                    yield Static("Stream em tempo real", classes="label")
+                    yield Button("Copiar", id="copy_stream_button", classes="copy_btn")
                 yield RichLog(id="stream_log", wrap=True, markup=False, highlight=False)
 
             with Vertical(classes="log_col"):
-                yield Static("Resultados por etapa", classes="label")
+                with Horizontal(classes="log_header"):
+                    yield Static("Resultados por etapa", classes="label")
+                    yield Button("Copiar", id="copy_results_button", classes="copy_btn")
                 yield RichLog(id="result_log", wrap=True, markup=False, highlight=True)
 
         with Horizontal(id="feedback_row"):
@@ -249,7 +267,9 @@ class CouncilTextualApp(App[None]):
         self._dispatch_ui(self._start_stream, title, style)
 
     def _start_stream(self, title: str, style: str) -> None:
-        self._stream_log().write(Text(f"== {title} ==", style=f"bold {style}"))
+        stream_title = f"== {title} =="
+        self._stream_log().write(Text(stream_title, style=f"bold {style}"))
+        self._stream_buffer.append(stream_title)
         self.set_status(f"Executando: {title}", style="yellow")
 
     def append_stream(self, text: str) -> None:
@@ -258,12 +278,15 @@ class CouncilTextualApp(App[None]):
     def _append_stream(self, text: str) -> None:
         if text:
             self._stream_log().write(text)
+            self._stream_buffer.append(text)
 
     def finish_stream(self) -> None:
         self._dispatch_ui(self._finish_stream)
 
     def _finish_stream(self) -> None:
-        self._stream_log().write(Text("----------------------------------------", style="dim"))
+        separator = "----------------------------------------"
+        self._stream_log().write(Text(separator, style="dim"))
+        self._stream_buffer.append(separator)
 
     def add_result_panel(
         self,
@@ -293,6 +316,9 @@ class CouncilTextualApp(App[None]):
             expand=False,
         )
         self._result_log().write(panel)
+        self._result_buffer.append(f"=== {title} ===")
+        self._result_buffer.append(content)
+        self._result_buffer.append("")
 
     def show_error(self, message: str) -> None:
         self._dispatch_ui(self._show_error, message)
@@ -306,6 +332,9 @@ class CouncilTextualApp(App[None]):
                 expand=False,
             )
         )
+        self._result_buffer.append("=== Erro ===")
+        self._result_buffer.append(message)
+        self._result_buffer.append("")
         self._set_status(message, style="red")
 
     def show_success(self, message: str) -> None:
@@ -320,6 +349,9 @@ class CouncilTextualApp(App[None]):
                 expand=False,
             )
         )
+        self._result_buffer.append("=== Sucesso ===")
+        self._result_buffer.append(message)
+        self._result_buffer.append("")
         self._set_status(message, style="green")
 
     def clear_logs(self) -> None:
@@ -328,6 +360,8 @@ class CouncilTextualApp(App[None]):
     def _clear_logs(self) -> None:
         self._stream_log().clear()
         self._result_log().clear()
+        self._stream_buffer.clear()
+        self._result_buffer.clear()
         self._set_status("Pronto.", style="white")
 
     def _set_running(self, running: bool) -> None:
@@ -365,6 +399,10 @@ class CouncilTextualApp(App[None]):
             self._start_execution()
         elif event.button.id == "clear_button":
             self.clear_logs()
+        elif event.button.id == "copy_stream_button":
+            self.action_copy_stream()
+        elif event.button.id == "copy_results_button":
+            self.action_copy_results()
         elif event.button.id == "continue_button" and self._awaiting_feedback:
             self._resolve_feedback(None)
         elif event.button.id == "send_feedback_button" and self._awaiting_feedback:
@@ -383,6 +421,38 @@ class CouncilTextualApp(App[None]):
 
     def action_clear_logs(self) -> None:
         self.clear_logs()
+
+    def action_copy_stream(self) -> None:
+        self._copy_text_payload(
+            payload="\n".join(self._stream_buffer),
+            label="stream",
+            empty_message="Stream vazio para copiar.",
+        )
+
+    def action_copy_results(self) -> None:
+        self._copy_text_payload(
+            payload="\n".join(self._result_buffer),
+            label="resultados",
+            empty_message="Resultados vazios para copiar.",
+        )
+
+    def _copy_text_payload(self, payload: str, label: str, empty_message: str) -> None:
+        if not payload.strip():
+            self.set_status(empty_message, style="yellow")
+            return
+
+        try:
+            self.copy_to_clipboard(payload)
+            self.set_status(f"{label.capitalize()} copiados para clipboard.", style="green")
+        except Exception:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = f"/tmp/council_{label}_{timestamp}.txt"
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(payload)
+            self.set_status(
+                f"Clipboard indisponível. Conteúdo salvo em {path}",
+                style="yellow",
+            )
 
     def request_step_feedback(self, agent_name: str, role_desc: str, output: str) -> str | None:
         del output
