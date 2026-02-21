@@ -41,6 +41,7 @@ class Executor:
           o conteúdo de input_data é injetado no próprio comando (com escaping seguro),
           e nada é enviado via stdin.
         """
+        process: subprocess.Popen | None = None
         try:
             if self._cancel_event.is_set():
                 raise ExecutionAborted("Execução abortada pelo usuário.")
@@ -97,7 +98,8 @@ class Executor:
             return "".join(stdout_lines).strip()
             
         except subprocess.TimeoutExpired:
-            process.kill()
+            if process is not None:
+                self._terminate_process(process)
             self.ui.show_error(f"O comando '{command}' atingiu o timeout de {timeout}s.")
             raise CommandError(f"Timeout no comando: {command}")
         except ExecutionAborted:
