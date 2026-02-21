@@ -1,4 +1,3 @@
-import shlex
 import subprocess
 from typing import Any
 
@@ -91,7 +90,7 @@ class FakeProcess:
 def _patch_popen(monkeypatch: pytest.MonkeyPatch, process: FakeProcess) -> dict[str, Any]:
     calls: dict[str, Any] = {}
 
-    def fake_popen(command: str, **kwargs: Any) -> FakeProcess:
+    def fake_popen(command: list[str], **kwargs: Any) -> FakeProcess:
         calls["command"] = command
         calls["kwargs"] = kwargs
         return process
@@ -105,7 +104,7 @@ def test_prepare_command_injects_placeholder_and_disables_stdin() -> None:
 
     command_to_run, stdin_payload = executor._prepare_command("gemini -p {input}", "a 'quoted' prompt")
 
-    assert command_to_run == "gemini -p " + shlex.quote("a 'quoted' prompt")
+    assert command_to_run == ["gemini", "-p", "a 'quoted' prompt"]
     assert stdin_payload == ""
 
 
@@ -114,7 +113,7 @@ def test_prepare_command_keeps_stdin_when_no_placeholder_for_other_tools() -> No
 
     command_to_run, stdin_payload = executor._prepare_command("claude -p", "hello")
 
-    assert command_to_run == "claude -p"
+    assert command_to_run == ["claude", "-p"]
     assert stdin_payload == "hello"
 
 
@@ -123,7 +122,7 @@ def test_prepare_command_auto_injects_gemini_prompt_when_missing_value() -> None
 
     command_to_run, stdin_payload = executor._prepare_command("gemini -p", "hello world")
 
-    assert command_to_run == f"gemini -p {shlex.quote('hello world')}"
+    assert command_to_run == ["gemini", "-p", "hello world"]
     assert stdin_payload == ""
 
 
@@ -161,7 +160,8 @@ def test_run_cli_returns_output_and_streams_lines(monkeypatch: pytest.MonkeyPatc
     assert process.stdin.closed is True
     assert streamed == ["line 1", "line 2"]
     assert ui.errors == []
-    assert calls["command"] == "claude -p"
+    assert calls["command"] == ["claude", "-p"]
+    assert calls["kwargs"]["shell"] is False
 
 
 def test_run_cli_raises_command_error_on_non_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
