@@ -108,5 +108,7 @@ python -m council.main run "Crie um algoritmo distribuido de map-reduce" --flow-
 python -m council.main tui
 ```
 
+Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
+
 ---
 *Construído com base em design system limpo de código e arquitetura adaptável.*
