@@ -1,0 +1,41 @@
+{
+  "steps": [
+    {
+      "key": "plan",
+      "agent_name": "Claude",
+      "role_desc": "Planejamento",
+      "command": "claude -p",
+      "instruction": "Você é um arquiteto de software. Gere um plano para o requisito abaixo.",
+      "input_template": "{instruction}\n\nRequisito:\n{user_prompt}",
+      "style": "dark_goldenrod"
+    },
+    {
+      "key": "critique",
+      "agent_name": "Gemini",
+      "role_desc": "Crítica",
+      "command": "gemini -p \"\"",
+      "instruction": "Revise o plano e aponte riscos técnicos e de segurança.",
+      "input_template": "{instruction}\n\nPlano:\n{plan}",
+      "style": "dodger_blue1"
+    },
+    {
+      "key": "implement",
+      "agent_name": "Codex",
+      "role_desc": "Implementação",
+      "command": "codex exec --skip-git-repo-check",
+      "instruction": "Implemente o plano consolidando as críticas. Retorne apenas código.",
+      "input_template": "{instruction}\n\nPlano:\n{plan}\n\nCríticas:\n{critique}",
+      "style": "bright_black",
+      "is_code": true
+    },
+    {
+      "key": "review",
+      "agent_name": "Claude",
+      "role_desc": "Revisão Final",
+      "command": "claude -p",
+      "instruction": "Faça um code review objetivo e liste melhorias prioritárias.",
+      "input_template": "{instruction}\n\nCódigo:\n{implement}",
+      "style": "dark_goldenrod"
+    }
+  ]
+}
