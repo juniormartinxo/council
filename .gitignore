@@ -39,4 +39,4 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-flow.json
+*flow.json
