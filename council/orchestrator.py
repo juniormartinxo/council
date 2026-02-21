@@ -29,7 +29,7 @@ class Orchestrator:
             for step in self.flow_steps:
                 template_context = {
                     "user_prompt": user_prompt,
-                    "full_context": self.state.get_full_context(),
+                    "full_context": self.state.get_full_context(max_chars=step.max_context_chars),
                     "last_output": last_output,
                     "instruction": step.instruction,
                     **step_outputs,
@@ -43,6 +43,9 @@ class Orchestrator:
                     role_desc=step.role_desc,
                     command=step.command,
                     input_data=input_data,
+                    timeout=step.timeout,
+                    max_input_chars=step.max_input_chars,
+                    max_output_chars=step.max_output_chars,
                     style=step.style,
                     is_code=step.is_code,
                 )
@@ -68,6 +71,9 @@ class Orchestrator:
         role_desc: str,
         command: str,
         input_data: str,
+        timeout: int,
+        max_input_chars: int | None,
+        max_output_chars: int | None,
         style: str,
         is_code: bool = False,
     ) -> str:
@@ -78,7 +84,14 @@ class Orchestrator:
         self.ui.console.print(f"\nIniciando passo: {agent_name} ({role_desc})")
         
         with self.ui.live_stream(f"Processando {agent_name}...", style=style) as update_cb:
-            result = self.executor.run_cli(command, input_data, on_output=update_cb)
+            result = self.executor.run_cli(
+                command,
+                input_data,
+                timeout=timeout,
+                on_output=update_cb,
+                max_input_chars=max_input_chars,
+                max_output_chars=max_output_chars,
+            )
         
         self.state.add_turn(agent_name, "assistant", result, role_desc)
         
@@ -132,6 +145,9 @@ class Orchestrator:
                 role_desc=f"{step.role_desc} (Ajuste)",
                 command=step.command,
                 input_data=follow_up_input,
+                timeout=step.timeout,
+                max_input_chars=step.max_input_chars,
+                max_output_chars=step.max_output_chars,
                 style=step.style,
                 is_code=step.is_code,
             )
