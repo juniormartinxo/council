@@ -8,7 +8,7 @@ Este documento cataloga vulnerabilidades e lacunas de segurança identificadas n
 
 ## 🔴 Severidade Alta
 
-### SEC-01 — Execução via `shell=True` com campo `command` não sanitizado
+### SEC-01 — Execução via `shell=True` com campo `command` não sanitizado (✔️ Mitigado em 2026-02-21)
 
 **Localização:** `council/executor.py` — `Executor.run_cli()`, `subprocess.Popen(..., shell=True)`.
 
