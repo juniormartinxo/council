@@ -101,7 +101,7 @@ Adicionalmente, em cenários com `shell=True` e o caminho `_is_gemini_prompt_mis
 
 ---
 
-### SEC-05 — Fallback de clipboard salva em `/tmp` sem proteção
+### SEC-05 — Fallback de clipboard salva em `/tmp` sem proteção (✔️ Mitigado em 2026-02-21)
 
 **Localização:** `council/tui.py` — `_copy_text_payload()`.
 
@@ -120,6 +120,23 @@ Embora `NamedTemporaryFile` crie arquivo com `0o600` por padrão, não há `chmo
 | Usar `COUNCIL_HOME` (ex: `~/.config/council/clipboard/`) em vez de `/tmp`. | Baixo | Alto |
 | Aplicar `os.chmod(path, 0o600)` explicitamente após criação. | Trivial | Médio |
 | Implementar cleanup automático de arquivos temporários antigos. | Baixo | Médio |
+
+**Status atual:**
+Mitigado no fallback de clipboard da TUI.
+
+**Mitigações aplicadas:**
+- Fallback migrou de `/tmp` para `COUNCIL_HOME/clipboard/`.
+- Aplicação explícita de `chmod 0o600` nos arquivos salvos.
+- Cleanup automático de arquivos antigos com retenção de 7 dias.
+
+**Risco residual:**
+- Os arquivos de fallback ainda ficam at-rest em disco local (agora em diretório de aplicação com permissões restritas), portanto continuam sujeitos ao modelo de ameaça do host.
+- O payload trafega em memória do processo Python antes de persistência/descartes naturais de GC; não há zeroização explícita de buffer.
+- O nome do arquivo inclui o label sanitizado da origem (ex: stream/resultados), o que pode expor metadados de contexto para quem consiga listar o diretório.
+
+**Evidência:**
+- Código: `council/tui.py`
+- Testes: `tests/test_tui.py`
 
 ---
 
