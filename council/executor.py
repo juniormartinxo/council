@@ -1,4 +1,5 @@
 import subprocess
+import shlex
 from council.ui import UI
 
 class CommandError(Exception):
@@ -14,10 +15,17 @@ class Executor:
         """
         Executa um comando CLI via subprocess, injetando dados via stdin.
         Lida com timeouts e invoca de forma assíncrona o callback on_output se estiver disponível.
+
+        Suporte especial:
+        - Se o comando contiver o placeholder literal {input},
+          o conteúdo de input_data é injetado no próprio comando (com escaping seguro),
+          e nada é enviado via stdin.
         """
         try:
+            command_to_run, stdin_payload = self._prepare_command(command, input_data)
+
             process = subprocess.Popen(
-                command,
+                command_to_run,
                 shell=True,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -27,8 +35,8 @@ class Executor:
             )
             
             # Escreve o input data para a ferramenta pelo stdin
-            if input_data:
-                process.stdin.write(input_data)
+            if stdin_payload:
+                process.stdin.write(stdin_payload)
                 process.stdin.flush()
             process.stdin.close() # Sinaliza FIM DE INPUT para a pipeline não travar
 
@@ -48,8 +56,10 @@ class Executor:
             returncode = process.wait(timeout=timeout)
             
             if returncode != 0:
-                self.ui.show_error(f"Falha ao executar '{command}' (Código {returncode}):\n{stderr_content}")
-                raise CommandError(f"Erro no comando: {command}")
+                self.ui.show_error(
+                    f"Falha ao executar '{command_to_run}' (Código {returncode}):\n{stderr_content}"
+                )
+                raise CommandError(f"Erro no comando: {command_to_run}")
                 
             return "".join(stdout_lines).strip()
             
@@ -62,3 +72,41 @@ class Executor:
                 self.ui.show_error(f"Erro do sistema ao rodar '{command}': {str(e)}")
                 raise CommandError(f"Erro no ambiente: {str(e)}")
             raise
+
+    def _prepare_command(self, command: str, input_data: str) -> tuple[str, str]:
+        """
+        Resolve o comando final e define se o payload será enviado por stdin.
+        """
+        if "{input}" not in command:
+            if self._is_gemini_prompt_missing_value(command):
+                quoted_input = shlex.quote(input_data or "")
+                return f"{command} {quoted_input}", ""
+            return command, input_data
+
+        quoted_input = shlex.quote(input_data)
+        prepared_command = command.replace("{input}", quoted_input)
+        return prepared_command, ""
+
+    def _is_gemini_prompt_missing_value(self, command: str) -> bool:
+        """
+        Detecta comandos `gemini -p` / `gemini --prompt` sem valor.
+        """
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return False
+
+        if not tokens:
+            return False
+
+        binary_name = tokens[0].split("/")[-1]
+        if binary_name != "gemini":
+            return False
+
+        for index, token in enumerate(tokens):
+            if token in {"-p", "--prompt"}:
+                return index + 1 >= len(tokens)
+            if token.startswith("--prompt="):
+                return False
+
+        return False
