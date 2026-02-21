@@ -17,10 +17,11 @@ Antes de avançar em features de alto impacto, a base técnica precisa sustentar
 *   **Empacotamento (`pyproject.toml`):** O Council é distribuível como pacote Python com entry-point `council` via `pip install .` ou `pipx install .`. Comando global `council run` e `council tui` funcionam sem `python -m`.
 *   **Diretório de dados do usuário (`COUNCIL_HOME`):** Módulo `paths.py` centraliza caminhos de armazenamento respeitando `XDG_CONFIG_HOME` (Linux), `~/Library/Application Support` (macOS) e `APPDATA` (Windows). O estado da TUI já persiste em `~/.config/council/tui_state.json`.
 *   **Resolução de configuração em cascata:** O `flow.json` é resolvido automaticamente em 4 níveis: `--flow-config` → `$COUNCIL_FLOW_CONFIG` → `./flow.json` (CWD) → `~/.config/council/flow.json` → default interno.
+*   **Testes automatizados (suite mínima `pytest`):** Base de testes criada em `tests/` com cobertura de smoke tests para `config.py` (parsing de JSON, validação de duplicatas/chaves reservadas, templates) e `executor.py` (preparação de comandos, placeholder `{input}`, variações de prompt do Gemini, sucesso/erro/timeout/cancelamento em `run_cli`). `pyproject.toml` atualizado com `project.optional-dependencies.dev` e configuração de `pytest`.
 
 ### 🔜 Próximos passos
 
-*   **Testes automatizados:** Adicionar suite mínima com `pytest`. Hoje a validação é apenas `python -m compileall council`. Smoke tests para `config.py` (parsing de JSON, validação de duplicatas, templates) e `executor.py` (preparação de comandos, tratamento de `{input}`) são os candidatos de maior retorno imediato.
+*   **CI de Testes:** Executar `pytest` automaticamente em pull requests e merges para proteger regressões do core (`config`, `executor`, `orchestrator` e TUI state) e tornar a validação contínua, não apenas local.
 *   **Persistência estruturada (`COUNCIL_HOME/db`):** `CouncilState` é 100% in-memory (`list[Turn]` que nasce e morre com o processo). Introduzir um banco SQLite local para historiar runs completos (prompt, steps executados, outputs, duração, timestamps). Esse banco é pré-requisito direto dos pilares de Telemetria (§4) e Grafos (§1).
 
 ---
@@ -132,7 +133,7 @@ Se os agentes interagirem entre si e precisarem listar diretórios, criar arquiv
 
 | Prioridade | Pilar | Justificativa |
 | :--- | :--- | :--- |
-| **P0** | §0 Fundação (testes + persistência) | Pré-requisito técnico para tudo que vem depois |
+| **P0** | §0 Fundação (CI de testes + persistência) | Pré-requisito técnico para tudo que vem depois |
 | **P1** | §1 Grafos e Loops Condicionais | Maior impacto funcional — transforma o pipeline de linear em inteligente |
 | **P1** | §2 Resiliência do Executor | Bug-fix disfarçado de feature — rate limits abortam pipelines silenciosamente |
 | **P2** | §3 Distribuição (binário + PyPI) | Base já existe, falta o "último mile" para adoção ampla |
