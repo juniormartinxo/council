@@ -176,6 +176,42 @@ def test_load_flow_steps_parses_alias_fields_and_is_code(tmp_path: Path) -> None
     assert steps[0].is_code is True
 
 
+def test_load_flow_steps_parses_optional_runtime_limits(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(
+        path,
+        [
+            _step_payload(
+                timeout=300,
+                max_input_chars=1200,
+                max_output_chars=2500,
+                max_context_chars=5000,
+            )
+        ],
+    )
+
+    steps = load_flow_steps(str(path))
+
+    assert steps[0].timeout == 300
+    assert steps[0].max_input_chars == 1200
+    assert steps[0].max_output_chars == 2500
+    assert steps[0].max_context_chars == 5000
+
+
+@pytest.mark.parametrize("field_name", ["timeout", "max_input_chars", "max_output_chars", "max_context_chars"])
+@pytest.mark.parametrize("invalid_value", [0, -1, "x", True])
+def test_load_flow_steps_rejects_invalid_optional_runtime_limits(
+    tmp_path: Path,
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(**{field_name: invalid_value})])
+
+    with pytest.raises(ConfigError, match=field_name):
+        load_flow_steps(str(path))
+
+
 @pytest.mark.parametrize(
     ("command", "operator"),
     [
