@@ -101,6 +101,7 @@ class CouncilTextualApp(App[None]):
     RUN_LABEL_IDLE = "Executar"
     RUN_LABEL_RUNNING = "Executando..."
     BINDINGS = [
+        ("ctrl+q", "quit_app", "Fechar"),
         ("ctrl+r", "run_flow", "Executar"),
         ("ctrl+l", "clear_logs", "Limpar Logs"),
         ("ctrl+1", "copy_stream", "Copiar Stream"),
@@ -197,11 +198,13 @@ class CouncilTextualApp(App[None]):
     def __init__(self, initial_prompt: str = "", initial_flow_config: str = ""):
         super().__init__()
         persisted_state = self._load_persisted_state()
-        saved_prompt = self._coerce_string(persisted_state.get("last_prompt"))
         saved_flow_config = self._coerce_string(persisted_state.get("last_flow_config"))
 
-        self._initial_prompt = initial_prompt or saved_prompt
+        # O campo de prompt abre vazio por padrão; histórico continua disponível via seta ↑/↓.
+        self._initial_prompt = initial_prompt
         self._initial_flow_config = initial_flow_config or saved_flow_config
+        self._last_prompt_value = self._initial_prompt
+        self._last_flow_config_value = self._initial_flow_config
         self._flow_running = False
         self._awaiting_feedback = False
         self._feedback_event = threading.Event()
@@ -511,6 +514,8 @@ class CouncilTextualApp(App[None]):
 
         flow_path = self.query_one("#flow_input", Input).value.strip() or None
 
+        self._last_prompt_value = prompt
+        self._last_flow_config_value = flow_path or ""
         self._remember_prompt(prompt)
         self._persist_state(last_prompt=prompt, last_flow_config=flow_path or "")
         self.clear_logs()
@@ -568,6 +573,9 @@ class CouncilTextualApp(App[None]):
             label=f"resultados_{selected_label}",
             empty_message="Resultados vazios para copiar.",
         )
+
+    def action_quit_app(self) -> None:
+        self.exit()
 
     def _copy_text_payload(self, payload: str, label: str, empty_message: str) -> None:
         if not payload.strip():
@@ -640,19 +648,20 @@ class CouncilTextualApp(App[None]):
         prompt_input.cursor_position = len(prompt_input.value)
 
     def _persist_state(self, last_prompt: str | None = None, last_flow_config: str | None = None) -> None:
-        prompt_value = last_prompt if last_prompt is not None else self._safe_input_value(
-            input_id="prompt_input",
-            fallback=self._initial_prompt,
-        )
-        flow_value = (
-            last_flow_config
-            if last_flow_config is not None
-            else self._safe_input_value(input_id="flow_input", fallback=self._initial_flow_config)
-        )
+        if last_prompt is not None:
+            self._last_prompt_value = last_prompt
+        if last_flow_config is not None:
+            self._last_flow_config_value = last_flow_config
+
+        live_prompt_value = self._safe_input_value(input_id="prompt_input", fallback=self._last_prompt_value)
+        live_flow_value = self._safe_input_value(input_id="flow_input", fallback=self._last_flow_config_value)
+
+        self._last_prompt_value = live_prompt_value
+        self._last_flow_config_value = live_flow_value
 
         state_payload = {
-            "last_prompt": prompt_value,
-            "last_flow_config": flow_value,
+            "last_prompt": self._last_prompt_value,
+            "last_flow_config": self._last_flow_config_value,
             "prompt_history": self._prompt_history,
         }
 
