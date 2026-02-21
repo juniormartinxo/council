@@ -84,6 +84,10 @@ Exemplo com `steps`:
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
 - `is_code` (opcional, boolean): trata saída como código para renderização.
+- `timeout` (opcional, inteiro > 0): timeout do passo em segundos. Padrão: `120`.
+- `max_input_chars` (opcional, inteiro > 0): limite de input para o passo.
+- `max_output_chars` (opcional, inteiro > 0): limite de output mantido em memória/contexto para o passo.
+- `max_context_chars` (opcional, inteiro > 0): limite de contexto aplicado somente ao passo.
 
 Alias suportados:
 
@@ -130,6 +134,17 @@ O carregamento falha com erro claro quando:
 9. O `input_template` referencia placeholder inexistente.
 10. O `command` usa binário inexistente no `PATH`.
 11. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
+12. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
+
+## 6.1 Limites Globais por Ambiente
+
+Além dos limites por passo no JSON, o Council permite defaults globais via ambiente:
+
+- `COUNCIL_MAX_CONTEXT_CHARS`
+- `COUNCIL_MAX_INPUT_CHARS`
+- `COUNCIL_MAX_OUTPUT_CHARS`
+
+Se qualquer uma dessas variáveis estiver definida com valor inválido (não numérico ou `<= 0`), a execução falha na inicialização com erro explícito.
 
 ## 7. Exemplo Completo
 
