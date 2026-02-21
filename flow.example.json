@@ -7,6 +7,8 @@
       "command": "claude -p",
       "instruction": "Você é um arquiteto de software. Gere um plano para o requisito abaixo.",
       "input_template": "{instruction}\n\nRequisito:\n{user_prompt}",
+      "timeout": 180,
+      "max_context_chars": 80000,
       "style": "dark_goldenrod"
     },
     {
@@ -25,6 +27,9 @@
       "command": "codex exec --skip-git-repo-check",
       "instruction": "Implemente o plano consolidando as críticas. Retorne apenas código.",
       "input_template": "{instruction}\n\nPlano:\n{plan}\n\nCríticas:\n{critique}",
+      "timeout": 300,
+      "max_input_chars": 180000,
+      "max_output_chars": 260000,
       "style": "bright_black",
       "is_code": true
     },
