@@ -166,7 +166,7 @@ Mitigado no fallback de clipboard da TUI.
 
 ---
 
-### SEC-06 — Sem limites de tamanho em input, output e contexto
+### SEC-06 — Sem limites de tamanho em input, output e contexto (✔️ Mitigado em 2026-02-21)
 
 **Localização:** `council/executor.py` — `run_cli()` (stdin write, stdout accumulation). `council/state.py` — `get_full_context()`.
 
@@ -188,6 +188,23 @@ Um agente que retorna output excessivamente grande causa:
 | Limitar `get_full_context()` com truncamento (manter últimos N caracteres ou turns mais recentes). | Baixo | Alto |
 | Limitar `stdin_payload` com aviso ao ultrapassar threshold configurável. | Baixo | Médio |
 | Streaming de output para arquivo temporário ao invés de acumular em `stdout_lines[]` em memória. | Médio | Alto |
+
+**Status atual (mitigado em 2026-02-21):**
+- `CouncilState.get_full_context()` agora aplica truncamento de contexto com retenção do trecho mais recente e aviso de truncamento.
+- O limite de contexto é configurável por `COUNCIL_MAX_CONTEXT_CHARS` (default: `100000`).
+- `Executor.run_cli()` agora bloqueia inputs acima do limite configurado por `COUNCIL_MAX_INPUT_CHARS` (default: `120000`).
+- `Executor.run_cli()` agora usa spool temporário em arquivo quando o stdout excede `COUNCIL_MAX_OUTPUT_CHARS` (default: `200000`), evitando crescimento ilimitado em memória sem abortar o passo.
+- `flow.json` ganhou tuning por passo para `timeout`, `max_input_chars`, `max_output_chars` e `max_context_chars`, removendo o acoplamento a limites globais únicos.
+- Leitura de limites via env foi centralizada em utilitário único (`council/limits.py`), evitando drift de comportamento entre módulos.
+- Env vars de limite com valor inválido (não numérico ou `<= 0`) agora falham explicitamente na inicialização (fail-fast), evitando fallback silencioso.
+- Cobertura de testes adicionada para truncamento de contexto, limites de input/output, parsing de limites por passo e validação estrita de env.
+
+**Risco residual:**
+- Sem pendências abertas neste item após as mitigações acima; comportamento de truncamento/limites passa a ser política explícita e configurável.
+
+**Evidência:**
+- Código: `council/state.py`, `council/executor.py`, `council/limits.py`, `council/config.py`, `council/orchestrator.py`
+- Testes: `tests/test_state.py`, `tests/test_executor.py`, `tests/test_limits.py`, `tests/test_config.py`, `tests/test_orchestrator.py`
 
 ---
 
