@@ -76,6 +76,7 @@ Cada passo aceita, entre outros campos:
 - `key`: identificador do resultado para ser reutilizado em passos seguintes.
 - `agent_name` / `role_desc`: rótulos exibidos na UI.
 - `command`: CLI real que será executada (ex: `claude -p`, `gemini -p {input}`, `codex exec --skip-git-repo-check`).
+  - Validacao de seguranca no parse: o binario deve existir no `PATH`; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
 - `instruction`: instrução principal do papel.
 - `input_template`: template com variáveis (`{user_prompt}`, `{full_context}`, `{last_output}` e `{key}` de passos anteriores).
 
