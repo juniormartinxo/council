@@ -13,7 +13,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Tab, Tabs
 
 from council.config import ConfigError, load_flow_steps
-from council.executor import CommandError, Executor
+from council.executor import CommandError, ExecutionAborted, Executor
 from council.orchestrator import Orchestrator
 from council.state import CouncilState
 
@@ -103,6 +103,7 @@ class CouncilTextualApp(App[None]):
     BINDINGS = [
         ("ctrl+q", "quit_app", "Fechar"),
         ("ctrl+r", "run_flow", "Executar"),
+        ("ctrl+x", "abort_flow", "Abortar"),
         ("ctrl+l", "clear_logs", "Limpar Logs"),
         ("ctrl+1", "copy_stream", "Copiar Stream"),
         ("ctrl+2", "copy_results", "Copiar Resultados"),
@@ -215,6 +216,8 @@ class CouncilTextualApp(App[None]):
         self._stream_selected_step_id = self.GENERAL_STEP_ID
         self._result_selected_step_id = self.GENERAL_STEP_ID
         self._current_step_id = self.GENERAL_STEP_ID
+        self._executor_lock = threading.Lock()
+        self._active_executor: Executor | None = None
         self._prompt_history = self._normalize_prompt_history(persisted_state.get("prompt_history"))
         self._history_index = len(self._prompt_history)
         self._history_draft = ""
@@ -502,6 +505,7 @@ class CouncilTextualApp(App[None]):
         self.query_one("#prompt_input", Input).disabled = running
         self.query_one("#flow_input", Input).disabled = running
         self.query_one("#clear_button", Button).disabled = running and not self._awaiting_feedback
+        self.query_one("#abort_button", Button).disabled = not running and not self._awaiting_feedback
 
     def _start_execution(self) -> None:
         if self._flow_running:
@@ -541,8 +545,8 @@ class CouncilTextualApp(App[None]):
             self._resolve_feedback(None)
         elif event.button.id == "send_feedback_button" and self._awaiting_feedback:
             self._submit_feedback_from_input()
-        elif event.button.id == "abort_button" and self._awaiting_feedback:
-            self._resolve_feedback("__ABORT__")
+        elif event.button.id == "abort_button":
+            self.action_abort_flow()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id in {"prompt_input", "flow_input"} and not self._awaiting_feedback:
@@ -555,6 +559,21 @@ class CouncilTextualApp(App[None]):
 
     def action_clear_logs(self) -> None:
         self.clear_logs()
+
+    def action_abort_flow(self) -> None:
+        if not self._flow_running and not self._awaiting_feedback:
+            self.set_status("Nenhuma execução ativa para abortar.", style="yellow")
+            return
+
+        self.set_status("Abortando execução...", style="yellow")
+
+        with self._executor_lock:
+            executor = self._active_executor
+        if executor is not None:
+            executor.request_cancel()
+
+        if self._awaiting_feedback:
+            self._resolve_feedback("__ABORT__")
 
     def action_copy_stream(self) -> None:
         selected_step = self._stream_selected_step_id
@@ -575,6 +594,8 @@ class CouncilTextualApp(App[None]):
         )
 
     def action_quit_app(self) -> None:
+        if self._flow_running or self._awaiting_feedback:
+            self.action_abort_flow()
         self.exit()
 
     def _copy_text_payload(self, payload: str, label: str, empty_message: str) -> None:
@@ -718,7 +739,7 @@ class CouncilTextualApp(App[None]):
         self._dispatch_ui(self._end_feedback_mode)
 
         if selected_feedback == "__ABORT__":
-            raise CommandError("Execução abortada pelo usuário.")
+            raise ExecutionAborted("Execução abortada pelo usuário.")
         return selected_feedback
 
     def _begin_feedback_mode(self, agent_name: str, role_desc: str) -> None:
@@ -745,7 +766,7 @@ class CouncilTextualApp(App[None]):
         self.query_one("#feedback_input", Input).value = ""
         self.query_one("#continue_button", Button).disabled = True
         self.query_one("#send_feedback_button", Button).disabled = True
-        self.query_one("#abort_button", Button).disabled = True
+        self.query_one("#abort_button", Button).disabled = not self._flow_running
         self.query_one("#clear_button", Button).disabled = self._flow_running
         self.set_status("Executando próximo passo...", style="yellow")
 
@@ -764,6 +785,8 @@ class CouncilTextualApp(App[None]):
         ui = TextualUIAdapter(self)
         state = CouncilState()
         executor = Executor(ui)
+        with self._executor_lock:
+            self._active_executor = executor
 
         try:
             flow_steps = load_flow_steps(flow_config)
@@ -780,6 +803,8 @@ class CouncilTextualApp(App[None]):
             ui.show_error(f"Erro inesperado na execução: {exc}")
         finally:
             self._feedback_event.set()
+            with self._executor_lock:
+                self._active_executor = None
             self._dispatch_ui(self._set_running, False)
 
 
