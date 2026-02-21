@@ -45,6 +45,9 @@ class Orchestrator:
                     style=step.style,
                     is_code=step.is_code,
                 )
+
+                result = self._collect_human_feedback_loop(step, result)
+
                 step_outputs[step.key] = result
                 last_output = result
             
@@ -64,7 +67,7 @@ class Orchestrator:
         style: str,
         is_code: bool = False,
     ) -> str:
-        self.ui.console.print(f"\n[bold {style}]Iniciando passo:[/bold {style}] {agent_name} ({role_desc}) via {command}")
+        self.ui.console.print(f"\nIniciando passo: {agent_name} ({role_desc})")
         
         with self.ui.live_stream(f"Processando {agent_name}...", style=style) as update_cb:
             result = self.executor.run_cli(command, input_data, on_output=update_cb)
@@ -84,3 +87,52 @@ class Orchestrator:
         self.ui.show_panel(f"{agent_name} - {role_desc}", result_display, style=style, is_code=is_code)
         
         return result
+
+    def _collect_human_feedback_loop(self, step: FlowStep, current_output: str) -> str:
+        """
+        Se a UI suportar interação humana por etapa, pausa o pipeline e permite
+        que o usuário:
+        - continue para o próximo agente; ou
+        - envie feedback para reexecutar o agente atual com ajustes.
+        """
+        request_feedback = getattr(self.ui, "request_step_feedback", None)
+        if not callable(request_feedback):
+            return current_output
+
+        output = current_output
+
+        while True:
+            feedback = request_feedback(
+                agent_name=step.agent_name,
+                role_desc=step.role_desc,
+                output=output,
+            )
+            if not feedback:
+                return output
+
+            self.state.add_turn(
+                "Human",
+                "user",
+                feedback,
+                f"Feedback para {step.agent_name} ({step.role_desc})",
+            )
+
+            follow_up_input = self._build_follow_up_input(step, previous_output=output, feedback=feedback)
+            output = self._step(
+                agent_name=step.agent_name,
+                role_desc=f"{step.role_desc} (Ajuste)",
+                command=step.command,
+                input_data=follow_up_input,
+                style=step.style,
+                is_code=step.is_code,
+            )
+
+    def _build_follow_up_input(self, step: FlowStep, previous_output: str, feedback: str) -> str:
+        return (
+            "Você recebeu feedback do usuário sobre sua resposta anterior.\n"
+            "Atualize e melhore sua resposta com base nesse feedback.\n\n"
+            f"INSTRUÇÃO ORIGINAL:\n{step.instruction}\n\n"
+            f"RESPOSTA ANTERIOR:\n{previous_output}\n\n"
+            f"FEEDBACK DO USUÁRIO:\n{feedback}\n\n"
+            "Retorne a nova versão completa da resposta."
+        )
