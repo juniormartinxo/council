@@ -14,7 +14,14 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Tab, Tabs
 
-from council.config import ConfigError, load_flow_steps
+from council.config import (
+    ConfigError,
+    FLOW_CONFIG_SOURCE_CWD,
+    FLOW_CONFIG_SOURCE_ENV,
+    ResolvedFlowConfig,
+    load_flow_steps,
+    resolve_flow_config,
+)
 from council.executor import CommandError, ExecutionAborted, Executor
 from council.orchestrator import Orchestrator
 from council.paths import get_council_home, get_tui_state_file_path
@@ -223,6 +230,8 @@ class CouncilTextualApp(App[None]):
         self._current_step_id = self.GENERAL_STEP_ID
         self._executor_lock = threading.Lock()
         self._active_executor: Executor | None = None
+        self._trusted_auto_flow_paths: set[str] = set()
+        self._pending_auto_flow_confirmation: str | None = None
         self._prompt_history = self._normalize_prompt_history(persisted_state.get("prompt_history"))
         self._history_index = len(self._prompt_history)
         self._history_draft = ""
@@ -512,6 +521,52 @@ class CouncilTextualApp(App[None]):
         self.query_one("#clear_button", Button).disabled = running and not self._awaiting_feedback
         self.query_one("#abort_button", Button).disabled = not running and not self._awaiting_feedback
 
+    def _normalize_path_key(self, path: Path) -> str:
+        try:
+            return str(path.resolve())
+        except OSError:
+            return str(path)
+
+    def _confirm_implicit_flow_if_needed(
+        self,
+        resolved_flow_config: ResolvedFlowConfig,
+        flow_path: str | None,
+    ) -> bool:
+        if flow_path is not None:
+            self._pending_auto_flow_confirmation = None
+            return True
+
+        if (
+            resolved_flow_config.source not in {FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV}
+            or resolved_flow_config.path is None
+        ):
+            self._pending_auto_flow_confirmation = None
+            return True
+
+        path_key = self._normalize_path_key(resolved_flow_config.path)
+        if path_key in self._trusted_auto_flow_paths:
+            self._pending_auto_flow_confirmation = None
+            return True
+
+        if self._pending_auto_flow_confirmation != path_key:
+            self._pending_auto_flow_confirmation = path_key
+            source_label = (
+                "COUNCIL_FLOW_CONFIG"
+                if resolved_flow_config.source == FLOW_CONFIG_SOURCE_ENV
+                else "./flow.json"
+            )
+            self._set_status(
+                f"Detectada configuração implícita via {source_label}. "
+                "Pressione Executar novamente para confirmar ou informe um caminho explícito "
+                "no campo de fluxo.",
+                style="yellow",
+            )
+            return False
+
+        self._trusted_auto_flow_paths.add(path_key)
+        self._pending_auto_flow_confirmation = None
+        return True
+
     def _start_execution(self) -> None:
         if self._flow_running:
             return
@@ -522,6 +577,14 @@ class CouncilTextualApp(App[None]):
             return
 
         flow_path = self.query_one("#flow_input", Input).value.strip() or None
+        try:
+            resolved_flow_config = resolve_flow_config(flow_path)
+        except ConfigError as exc:
+            self._set_status(f"Erro ao carregar configuração do fluxo: {exc}", style="red")
+            return
+
+        if not self._confirm_implicit_flow_if_needed(resolved_flow_config, flow_path):
+            return
 
         self._last_prompt_value = prompt
         self._last_flow_config_value = flow_path or ""
@@ -532,7 +595,7 @@ class CouncilTextualApp(App[None]):
         self._set_status("Preparando execução...", style="yellow")
         thread = threading.Thread(
             target=self.run_council_flow,
-            args=(prompt, flow_path),
+            args=(prompt, flow_path, resolved_flow_config),
             daemon=True,
         )
         thread.start()
@@ -873,7 +936,12 @@ class CouncilTextualApp(App[None]):
         self._feedback_value = value
         self._feedback_event.set()
 
-    def run_council_flow(self, prompt: str, flow_config: str | None) -> None:
+    def run_council_flow(
+        self,
+        prompt: str,
+        flow_config: str | None,
+        resolved_flow_config: ResolvedFlowConfig | None = None,
+    ) -> None:
         ui = TextualUIAdapter(self)
         state = CouncilState()
         executor = Executor(ui)
@@ -881,7 +949,7 @@ class CouncilTextualApp(App[None]):
             self._active_executor = executor
 
         try:
-            flow_steps = load_flow_steps(flow_config)
+            flow_steps = load_flow_steps(flow_config, resolved_config=resolved_flow_config)
         except ConfigError as exc:
             ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
             self._dispatch_ui(self._set_running, False)
