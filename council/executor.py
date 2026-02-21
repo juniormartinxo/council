@@ -38,7 +38,7 @@ class Executor:
 
         Suporte especial:
         - Se o comando contiver o placeholder literal {input},
-          o conteúdo de input_data é injetado no próprio comando (com escaping seguro),
+          o conteúdo de input_data é injetado como argumento literal no argv final,
           e nada é enviado via stdin.
         """
         process: subprocess.Popen | None = None
@@ -46,11 +46,12 @@ class Executor:
             if self._cancel_event.is_set():
                 raise ExecutionAborted("Execução abortada pelo usuário.")
 
-            command_to_run, stdin_payload = self._prepare_command(command, input_data)
+            command_argv, stdin_payload = self._prepare_command(command, input_data)
+            command_display = shlex.join(command_argv)
 
             process = subprocess.Popen(
-                command_to_run,
-                shell=True,
+                command_argv,
+                shell=False,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -91,9 +92,9 @@ class Executor:
             
             if returncode != 0:
                 self.ui.show_error(
-                    f"Falha ao executar '{command_to_run}' (Código {returncode}):\n{stderr_content}"
+                    f"Falha ao executar '{command_display}' (Código {returncode}):\n{stderr_content}"
                 )
-                raise CommandError(f"Erro no comando: {command_to_run}")
+                raise CommandError(f"Erro no comando: {command_display}")
                 
             return "".join(stdout_lines).strip()
             
@@ -113,19 +114,19 @@ class Executor:
             with self._process_lock:
                 self._current_process = None
 
-    def _prepare_command(self, command: str, input_data: str) -> tuple[str, str]:
+    def _prepare_command(self, command: str, input_data: str) -> tuple[list[str], str]:
         """
         Resolve o comando final e define se o payload será enviado por stdin.
         """
+        command_tokens = shlex.split(command)
+
         if "{input}" not in command:
             if self._is_gemini_prompt_missing_value(command):
-                quoted_input = shlex.quote(input_data or "")
-                return f"{command} {quoted_input}", ""
-            return command, input_data
+                return [*command_tokens, input_data or ""], ""
+            return command_tokens, input_data
 
-        quoted_input = shlex.quote(input_data)
-        prepared_command = command.replace("{input}", quoted_input)
-        return prepared_command, ""
+        prepared_tokens = [token.replace("{input}", input_data) for token in command_tokens]
+        return prepared_tokens, ""
 
     def _is_gemini_prompt_missing_value(self, command: str) -> bool:
         """
