@@ -60,4 +60,4 @@ Ao injetarmos requisições pipeadas `string -> subprocess(cmd)`, sistemas avan�
 Para garantir orquestração fluida em rotinas invisíveis, o orquestrador impõe explicitamente bandeiras mitigadoras (Headless Mode):
 - Codex: Invoca-se através de `codex exec --skip-git-repo-check` para desviar da interface TUI/Menu e anular a validação forçada sobre o repositório Git subjacente.
 - Claude: Adicionado o modo _print_ `-p` estritamente para não invocar prompt de aprovação interativo.
-- Gemini: Executado no modo de resposta final e impessoal `gemini -p ""` empurrando a execução via stdin e neutralizando o ciclo contínuo do prompt default.
+- Gemini: Executado com `gemini -p {input}` para receber explicitamente o contexto final montado pelo pipeline sem depender do `stdin`.
