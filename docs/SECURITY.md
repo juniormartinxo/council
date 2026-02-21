@@ -1,8 +1,8 @@
 # Segurança — Council
 
-Este documento cataloga as vulnerabilidades e lacunas de segurança identificadas no código-fonte do Council, organizadas por severidade. Cada item inclui a localização exata no código, o cenário de exploração e a mitigação sugerida.
+Este documento cataloga vulnerabilidades e lacunas de segurança identificadas no código-fonte do Council, organizadas por severidade e status. Cada item inclui a localização exata no código, cenário de exploração e mitigação sugerida ou aplicada.
 
-> **Referência:** o pilar §6 do `ROADMAP.md` (Sandboxing) trata da camada de isolamento de runtime. Este documento foca nas vulnerabilidades **já presentes** no código atual, independentes do sandboxing.
+> **Referência:** o pilar §6 do `ROADMAP.md` (Sandboxing) trata da camada de isolamento de runtime. Este documento cobre vulnerabilidades atuais e mitigacoes recentes, independentes do sandboxing.
 
 ---
 
@@ -32,25 +32,26 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
 
 ---
 
-### SEC-02 — Campo `command` sem validação semântica no parsing
+### SEC-02 — Campo `command` sem validação semântica no parsing (Mitigado em 2026-02-21)
 
-**Localização:** `council/config.py` — `_parse_step()`, linha de extração do campo `command`.
+**Localização:** `council/config.py` — `_parse_step()` e `_validate_command()`.
 
-**Descrição:**
-A validação atual do campo `command` verifica apenas que é uma string não vazia. Não há verificação de:
-- Existência do binário no `$PATH` (via `shutil.which()`)
-- Presença de operadores de shell perigosos: pipes (`|`), encadeamentos (`&&`, `;`), redirecionamentos (`>`, `>>`)
-- Subshells (`` ` `` ou `$(...)`)
+**Status atual:**
+Mitigado no parsing de `flow.json` com validação semântica obrigatória do campo `command`.
 
-**Cenário de exploração:**
-Um `flow.json` com `"command": "rm -rf / #"` seria aceito e executado sem aviso algum.
+**Mitigações aplicadas:**
+- Parse com `shlex.split()` para validar sintaxe de shell.
+- Verificação de binário real no `$PATH` via `shutil.which(tokens[0])`.
+- Rejeição de metacaracteres perigosos no `command`: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
+- Rejeição de quebras de linha `\n` e `\r` para evitar command chaining com `shell=True`.
+- Cobertura de testes em `tests/test_config.py` com casos parametrizados para todos os operadores bloqueados.
 
-**Mitigação sugerida:**
+**Risco residual:**
+O executor ainda roda com `shell=True`, portanto comandos permitidos continuam com poder de execução no host. O risco estrutural principal permanece em `SEC-01`.
 
-| Ação | Esforço | Impacto |
-| :--- | :--- | :--- |
-| Parsear o `command` com `shlex.split()` e validar que o token[0] é um binário real via `shutil.which()`. | Baixo | Alto |
-| Emitir aviso (ou rejeitar) comandos contendo `\|`, `&&`, `;`, `` ` ``, `$(`, `>` no campo `command`. | Baixo | Alto |
+**Evidência:**
+- Código: `council/config.py`
+- Testes: `tests/test_config.py`
 
 ---
 
