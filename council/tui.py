@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
-from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
@@ -87,6 +86,12 @@ class TextualUIAdapter:
 class CouncilTextualApp(App[None]):
     TITLE = "Council TUI"
     SUB_TITLE = "Orquestrador Multi-Agent"
+    RUN_LABEL_IDLE = "Executar"
+    RUN_LABEL_RUNNING = "Executando..."
+    BINDINGS = [
+        ("ctrl+r", "run_flow", "Executar"),
+        ("ctrl+l", "clear_logs", "Limpar Logs"),
+    ]
 
     CSS = """
     Screen {
@@ -150,7 +155,7 @@ class CouncilTextualApp(App[None]):
         super().__init__()
         self._initial_prompt = initial_prompt
         self._initial_flow_config = initial_flow_config
-        self._running = False
+        self._flow_running = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -169,7 +174,7 @@ class CouncilTextualApp(App[None]):
                     placeholder="flow.example.json (opcional)",
                     id="flow_input",
                 )
-                yield Button("Executar", id="run_button", variant="primary")
+                yield Button(self.RUN_LABEL_IDLE, id="run_button", variant="primary")
                 yield Button("Limpar", id="clear_button")
 
         with Horizontal(id="logs"):
@@ -291,13 +296,15 @@ class CouncilTextualApp(App[None]):
         self._set_status("Pronto.", style="white")
 
     def _set_running(self, running: bool) -> None:
-        self._running = running
-        self.query_one("#run_button", Button).disabled = running
+        self._flow_running = running
+        run_button = self.query_one("#run_button", Button)
+        run_button.disabled = running
+        run_button.label = self.RUN_LABEL_RUNNING if running else self.RUN_LABEL_IDLE
         self.query_one("#prompt_input", Input).disabled = running
         self.query_one("#flow_input", Input).disabled = running
 
     def _start_execution(self) -> None:
-        if self._running:
+        if self._flow_running:
             return
 
         prompt = self.query_one("#prompt_input", Input).value.strip()
@@ -310,7 +317,12 @@ class CouncilTextualApp(App[None]):
         self.clear_logs()
         self._set_running(True)
         self._set_status("Preparando execução...", style="yellow")
-        self.run_council_flow(prompt, flow_path)
+        thread = threading.Thread(
+            target=self.run_council_flow,
+            args=(prompt, flow_path),
+            daemon=True,
+        )
+        thread.start()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run_button":
@@ -319,10 +331,15 @@ class CouncilTextualApp(App[None]):
             self.clear_logs()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "prompt_input":
+        if event.input.id in {"prompt_input", "flow_input"}:
             self._start_execution()
 
-    @work(thread=True, exclusive=True)
+    def action_run_flow(self) -> None:
+        self._start_execution()
+
+    def action_clear_logs(self) -> None:
+        self.clear_logs()
+
     def run_council_flow(self, prompt: str, flow_config: str | None) -> None:
         ui = TextualUIAdapter(self)
         state = CouncilState()
