@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime
 from contextlib import contextmanager
+from pathlib import Path
 
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
@@ -90,6 +93,9 @@ class TextualUIAdapter:
 class CouncilTextualApp(App[None]):
     TITLE = "Council TUI"
     SUB_TITLE = "Orquestrador Multi-Agent"
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    STATE_FILE_PATH = PROJECT_ROOT / ".council_tui_state.json"
+    MAX_HISTORY_ITEMS = 200
     RUN_LABEL_IDLE = "Executar"
     RUN_LABEL_RUNNING = "Executando..."
     BINDINGS = [
@@ -183,14 +189,21 @@ class CouncilTextualApp(App[None]):
 
     def __init__(self, initial_prompt: str = "", initial_flow_config: str = ""):
         super().__init__()
-        self._initial_prompt = initial_prompt
-        self._initial_flow_config = initial_flow_config
+        persisted_state = self._load_persisted_state()
+        saved_prompt = self._coerce_string(persisted_state.get("last_prompt"))
+        saved_flow_config = self._coerce_string(persisted_state.get("last_flow_config"))
+
+        self._initial_prompt = initial_prompt or saved_prompt
+        self._initial_flow_config = initial_flow_config or saved_flow_config
         self._flow_running = False
         self._awaiting_feedback = False
         self._feedback_event = threading.Event()
         self._feedback_value: str | None = None
         self._stream_buffer: list[str] = []
         self._result_buffer: list[str] = []
+        self._prompt_history = self._normalize_prompt_history(persisted_state.get("prompt_history"))
+        self._history_index = len(self._prompt_history)
+        self._history_draft = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -244,6 +257,27 @@ class CouncilTextualApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#prompt_input", Input).focus()
+
+    def on_unmount(self) -> None:
+        self._persist_state()
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key not in {"up", "down"}:
+            return
+        if self._flow_running or self._awaiting_feedback:
+            return
+
+        focused = self.focused
+        if not isinstance(focused, Input) or focused.id != "prompt_input":
+            return
+
+        if event.key == "up":
+            self._navigate_prompt_history_up()
+        else:
+            self._navigate_prompt_history_down()
+
+        event.stop()
+        event.prevent_default()
 
     def _dispatch_ui(self, callback, *args) -> None:
         if threading.current_thread() is threading.main_thread():
@@ -384,6 +418,8 @@ class CouncilTextualApp(App[None]):
 
         flow_path = self.query_one("#flow_input", Input).value.strip() or None
 
+        self._remember_prompt(prompt)
+        self._persist_state(last_prompt=prompt, last_flow_config=flow_path or "")
         self.clear_logs()
         self._set_running(True)
         self._set_status("Preparando execução...", style="yellow")
@@ -453,6 +489,112 @@ class CouncilTextualApp(App[None]):
                 f"Clipboard indisponível. Conteúdo salvo em {path}",
                 style="yellow",
             )
+
+    def _remember_prompt(self, prompt: str) -> None:
+        cleaned_prompt = prompt.strip()
+        if not cleaned_prompt:
+            return
+
+        self._prompt_history = [item for item in self._prompt_history if item != cleaned_prompt]
+        self._prompt_history.append(cleaned_prompt)
+
+        if len(self._prompt_history) > self.MAX_HISTORY_ITEMS:
+            self._prompt_history = self._prompt_history[-self.MAX_HISTORY_ITEMS :]
+
+        self._history_index = len(self._prompt_history)
+        self._history_draft = ""
+
+    def _navigate_prompt_history_up(self) -> None:
+        if not self._prompt_history:
+            self.set_status("Histórico de prompts vazio.", style="yellow")
+            return
+
+        prompt_input = self.query_one("#prompt_input", Input)
+        if self._history_index == len(self._prompt_history):
+            self._history_draft = prompt_input.value
+
+        if self._history_index > 0:
+            self._history_index -= 1
+
+        prompt_input.value = self._prompt_history[self._history_index]
+        prompt_input.cursor_position = len(prompt_input.value)
+
+    def _navigate_prompt_history_down(self) -> None:
+        if not self._prompt_history:
+            self.set_status("Histórico de prompts vazio.", style="yellow")
+            return
+
+        prompt_input = self.query_one("#prompt_input", Input)
+        history_size = len(self._prompt_history)
+
+        if self._history_index < history_size - 1:
+            self._history_index += 1
+            prompt_input.value = self._prompt_history[self._history_index]
+        elif self._history_index == history_size - 1:
+            self._history_index = history_size
+            prompt_input.value = self._history_draft
+
+        prompt_input.cursor_position = len(prompt_input.value)
+
+    def _persist_state(self, last_prompt: str | None = None, last_flow_config: str | None = None) -> None:
+        prompt_value = last_prompt if last_prompt is not None else self._safe_input_value(
+            input_id="prompt_input",
+            fallback=self._initial_prompt,
+        )
+        flow_value = (
+            last_flow_config
+            if last_flow_config is not None
+            else self._safe_input_value(input_id="flow_input", fallback=self._initial_flow_config)
+        )
+
+        state_payload = {
+            "last_prompt": prompt_value,
+            "last_flow_config": flow_value,
+            "prompt_history": self._prompt_history,
+        }
+
+        try:
+            self.STATE_FILE_PATH.write_text(
+                json.dumps(state_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _safe_input_value(self, input_id: str, fallback: str) -> str:
+        try:
+            return self.query_one(f"#{input_id}", Input).value.strip()
+        except Exception:
+            return fallback
+
+    def _load_persisted_state(self) -> dict[str, object]:
+        try:
+            if not self.STATE_FILE_PATH.exists():
+                return {}
+            payload = json.loads(self.STATE_FILE_PATH.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _normalize_prompt_history(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            cleaned = item.strip()
+            if not cleaned or cleaned in normalized:
+                continue
+            normalized.append(cleaned)
+
+        if len(normalized) > self.MAX_HISTORY_ITEMS:
+            normalized = normalized[-self.MAX_HISTORY_ITEMS :]
+        return normalized
+
+    def _coerce_string(self, value: object) -> str:
+        return value.strip() if isinstance(value, str) else ""
 
     def request_step_feedback(self, agent_name: str, role_desc: str, output: str) -> str | None:
         del output
