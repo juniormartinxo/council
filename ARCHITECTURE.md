@@ -11,6 +11,7 @@ A base de código do Council adere estritamente à ideia de _Single Responsibili
 - `orchestrator.py` -> **Regra de Negócios / Controlador** (Contém a sequência de chamadas e lógicas de fluxo).
 - `executor.py` -> **Camada de Infraestrutura / Adapter** (Acesso direto a chamadas do SO via Subprocess).
 - `ui.py` -> **Camada de Apresentação / View** (Isolamento total dos prints baseados no Rich).
+- `tui.py` -> **Camada de Apresentação Interativa** (Textual App + adaptador para reaproveitar Orchestrator/Executor).
 - `state.py` -> **Repositório em Memória / Entidade** (Armazena a evolução do contexto do agente).
 
 O acoplamento é injetado (via Dependency Injection) na porta de entrada da aplicação, garantindo que o módulo abstrator de orquestração não dependa de instâncias auto-criadas de Infra ou Visualização.
