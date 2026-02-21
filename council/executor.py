@@ -3,7 +3,20 @@ import shlex
 import threading
 import os
 import signal
+import tempfile
+from typing import TextIO
+
+from council.limits import read_positive_int_env
 from council.ui import UI
+
+
+DEFAULT_MAX_INPUT_CHARS = 120_000
+DEFAULT_MAX_OUTPUT_CHARS = 200_000
+MAX_INPUT_CHARS_ENV_VAR = "COUNCIL_MAX_INPUT_CHARS"
+MAX_OUTPUT_CHARS_ENV_VAR = "COUNCIL_MAX_OUTPUT_CHARS"
+OUTPUT_TRUNCATION_NOTICE = (
+    "[... saída truncada para o limite configurado; conteúdo completo descartado para preservar memória ...]\n"
+)
 
 class CommandError(Exception):
     """Exceção levantada quando um subprocesso falha."""
@@ -15,8 +28,31 @@ class ExecutionAborted(CommandError):
 
 class Executor:
     """Responsável por orquestrar subprocessos CLI capturando stdin/stdout."""
-    def __init__(self, ui: UI):
+    def __init__(
+        self,
+        ui: UI,
+        max_input_chars: int | None = None,
+        max_output_chars: int | None = None,
+    ):
         self.ui = ui
+        if max_input_chars is None:
+            self.max_input_chars = read_positive_int_env(
+                MAX_INPUT_CHARS_ENV_VAR,
+                DEFAULT_MAX_INPUT_CHARS,
+            )
+        else:
+            self.max_input_chars = max_input_chars
+        if max_output_chars is None:
+            self.max_output_chars = read_positive_int_env(
+                MAX_OUTPUT_CHARS_ENV_VAR,
+                DEFAULT_MAX_OUTPUT_CHARS,
+            )
+        else:
+            self.max_output_chars = max_output_chars
+        if self.max_input_chars <= 0:
+            raise ValueError("max_input_chars deve ser um inteiro positivo.")
+        if self.max_output_chars <= 0:
+            raise ValueError("max_output_chars deve ser um inteiro positivo.")
         self._cancel_event = threading.Event()
         self._process_lock = threading.Lock()
         self._current_process: subprocess.Popen | None = None
@@ -31,7 +67,15 @@ class Executor:
 
         self._terminate_process(process)
 
-    def run_cli(self, command: str, input_data: str, timeout: int = 120, on_output=None) -> str:
+    def run_cli(
+        self,
+        command: str,
+        input_data: str,
+        timeout: int = 120,
+        on_output=None,
+        max_input_chars: int | None = None,
+        max_output_chars: int | None = None,
+    ) -> str:
         """
         Executa um comando CLI via subprocess, injetando dados via stdin.
         Lida com timeouts e invoca de forma assíncrona o callback on_output se estiver disponível.
@@ -42,9 +86,33 @@ class Executor:
           e nada é enviado via stdin.
         """
         process: subprocess.Popen | None = None
+        output_spool: TextIO | None = None
         try:
             if self._cancel_event.is_set():
                 raise ExecutionAborted("Execução abortada pelo usuário.")
+
+            if timeout <= 0:
+                self.ui.show_error("Timeout inválido: informe um inteiro positivo.")
+                raise CommandError("Timeout inválido")
+
+            effective_max_input_chars = self.max_input_chars if max_input_chars is None else max_input_chars
+            effective_max_output_chars = self.max_output_chars if max_output_chars is None else max_output_chars
+
+            if effective_max_input_chars <= 0:
+                self.ui.show_error("max_input_chars inválido: informe um inteiro positivo.")
+                raise CommandError("max_input_chars inválido")
+            if effective_max_output_chars <= 0:
+                self.ui.show_error("max_output_chars inválido: informe um inteiro positivo.")
+                raise CommandError("max_output_chars inválido")
+
+            if len(input_data) > effective_max_input_chars:
+                self.ui.show_error(
+                    (
+                        f"Input excedeu o limite configurado de {effective_max_input_chars} caracteres "
+                        f"para '{command}'."
+                    )
+                )
+                raise CommandError(f"Input acima do limite para: {command}")
 
             command_argv, stdin_payload = self._prepare_command(command, input_data)
             command_display = shlex.join(command_argv)
@@ -70,13 +138,49 @@ class Executor:
             process.stdin.close() # Sinaliza FIM DE INPUT para a pipeline não travar
 
             stdout_lines = []
+            captured_stdout_chars = 0
+            tail_chunks: list[str] = []
+            tail_chars = 0
+
+            def append_tail(chunk: str) -> tuple[int, list[str]]:
+                nonlocal tail_chars
+                if not chunk:
+                    return tail_chars, tail_chunks
+                tail_chunks.append(chunk)
+                tail_chars += len(chunk)
+
+                while tail_chars > effective_max_output_chars and tail_chunks:
+                    overflow = tail_chars - effective_max_output_chars
+                    first = tail_chunks[0]
+                    if len(first) <= overflow:
+                        tail_chars -= len(first)
+                        tail_chunks.pop(0)
+                        continue
+                    tail_chunks[0] = first[overflow:]
+                    tail_chars -= overflow
+
+                return tail_chars, tail_chunks
             
             # Lê o stdout linha a linha em tempo real
             for line in iter(process.stdout.readline, ''):
                 if self._cancel_event.is_set():
                     self._terminate_process(process)
                     break
-                stdout_lines.append(line)
+
+                projected_size = captured_stdout_chars + len(line)
+                if output_spool is None and projected_size <= effective_max_output_chars:
+                    stdout_lines.append(line)
+                    captured_stdout_chars = projected_size
+                else:
+                    if output_spool is None:
+                        output_spool = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+                        baseline_output = "".join(stdout_lines)
+                        output_spool.write(baseline_output)
+                        append_tail(baseline_output)
+                        stdout_lines.clear()
+                    output_spool.write(line)
+                    append_tail(line)
+
                 if on_output:
                     on_output(line.rstrip('\n'))
 
@@ -95,8 +199,12 @@ class Executor:
                     f"Falha ao executar '{command_display}' (Código {returncode}):\n{stderr_content}"
                 )
                 raise CommandError(f"Erro no comando: {command_display}")
-                
-            return "".join(stdout_lines).strip()
+
+            if output_spool is None:
+                return "".join(stdout_lines).strip()
+
+            truncated_output = "".join(tail_chunks).strip()
+            return f"{OUTPUT_TRUNCATION_NOTICE}{truncated_output}".strip()
             
         except subprocess.TimeoutExpired:
             if process is not None:
@@ -111,6 +219,8 @@ class Executor:
                 raise CommandError(f"Erro no ambiente: {str(e)}")
             raise
         finally:
+            if output_spool is not None:
+                output_spool.close()
             with self._process_lock:
                 self._current_process = None
 
