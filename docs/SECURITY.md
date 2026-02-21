@@ -30,6 +30,25 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
 | Alertar na TUI/CLI quando um `flow.json` do CWD é detectado automaticamente, pedindo confirmação antes da primeira execução. | Baixo | Alto |
 | Documentar no `README.md` e `FLOW_CONFIG.md` o risco de executar fluxos de fontes não confiáveis. | Trivial | Médio |
 
+**Status atual (mitigado em 2026-02-21, mantendo histórico do achado):**
+- Achado original (histórico):
+  - Execução em `shell=True` no executor.
+  - Ausência de allowlist de binários confiáveis no parsing.
+  - Confirmação limitada ao auto-load de `./flow.json`, sem cobrir origem via `COUNCIL_FLOW_CONFIG`.
+- Como foi corrigido:
+  - Execução migrou para `subprocess.Popen(..., shell=False)` no executor.
+  - Allowlist de binários aplicada no parsing de `command`: `claude`, `gemini`, `codex`, `ollama`.
+  - Rejeição de `command` com caminho explícito de binário (ex.: `/usr/bin/codex`).
+  - Confirmação explícita de fluxos implícitos carregados via `./flow.json` (CWD) **e** `COUNCIL_FLOW_CONFIG` (env).
+  - Em modo não interativo, execução implícita via CWD/env é bloqueada até uso de `--flow-config`.
+  - TUI mantém confirmação em duas etapas por sessão para fluxos implícitos.
+- Risco residual:
+  - Comandos allowlisted ainda executam no host, portanto a postura de confiança do binário instalado no ambiente local continua relevante.
+
+**Evidência:**
+- Código: `council/config.py`, `council/executor.py`, `council/main.py`, `council/tui.py`
+- Testes: `tests/test_config.py`, `tests/test_executor.py`, `tests/test_main.py`, `tests/test_tui.py`
+
 ---
 
 ### SEC-02 — Campo `command` sem validação semântica no parsing (✔️ Mitigado em 2026-02-21)
@@ -39,19 +58,25 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
 **Status atual:**
 Mitigado no parsing de `flow.json` com validação semântica obrigatória do campo `command`.
 
+**Achados originais (histórico):**
+- Campo `command` aceitava qualquer binário existente no `$PATH`, sem política de confiança.
+- Padrões de bloqueio não cobriam expansões como `$VAR`, `${...}` e `~`.
+- O risco era amplificado por execução em `shell=True` no executor.
+
 **Mitigações aplicadas:**
 - Parse com `shlex.split()` para validar sintaxe de shell.
 - Verificação de binário real no `$PATH` via `shutil.which(tokens[0])`.
-- Rejeição de metacaracteres perigosos no `command`: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
-- Rejeição de quebras de linha `\n` e `\r` para evitar command chaining com `shell=True`.
+- Rejeição de metacaracteres perigosos no `command`: `|`, `&&`, `;`, `` ` ``, `$(`, `${`, `$VAR`, `~`, `>`, `>>`.
+- Rejeição de quebras de linha `\n` e `\r` para evitar command chaining.
+- Rejeição de binários fora de allowlist e de comandos com caminho explícito no primeiro token.
 - Cobertura de testes em `tests/test_config.py` com casos parametrizados para todos os operadores bloqueados.
 
 **Risco residual:**
-O executor ainda roda com `shell=True`, portanto comandos permitidos continuam com poder de execução no host. O risco estrutural principal permanece em `SEC-01`.
+Não há mais execução via `shell=True`; o risco principal passa a ser abuso de binários legítimos permitidos no host.
 
 **Evidência:**
-- Código: `council/config.py`
-- Testes: `tests/test_config.py`
+- Código: `council/config.py`, `council/executor.py`
+- Testes: `tests/test_config.py`, `tests/test_executor.py`
 
 ---
 
