@@ -49,6 +49,10 @@ class FlowStep:
     input_template: str = "{instruction}\n\n{full_context}"
     style: str = "blue"
     is_code: bool = False
+    timeout: int = 120
+    max_input_chars: int | None = None
+    max_output_chars: int | None = None
+    max_context_chars: int | None = None
 
 
 @dataclass(frozen=True)
@@ -240,6 +244,10 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
     )
     style = _get_string(raw_step, ["style"], required=False) or "blue"
     is_code = _get_bool(raw_step, "is_code", default=False)
+    timeout = _get_optional_positive_int(raw_step, "timeout", step=position) or 120
+    max_input_chars = _get_optional_positive_int(raw_step, "max_input_chars", step=position)
+    max_output_chars = _get_optional_positive_int(raw_step, "max_output_chars", step=position)
+    max_context_chars = _get_optional_positive_int(raw_step, "max_context_chars", step=position)
 
     return FlowStep(
         key=key,
@@ -250,6 +258,10 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
         input_template=input_template,
         style=style,
         is_code=is_code,
+        timeout=timeout,
+        max_input_chars=max_input_chars,
+        max_output_chars=max_output_chars,
+        max_context_chars=max_context_chars,
     )
 
 
@@ -281,6 +293,20 @@ def _get_string(
         raise ConfigError(f"Campo obrigatório ausente ({expected}){location}.")
 
     return None
+
+
+def _get_optional_positive_int(source: dict[str, Any], field_name: str, step: int) -> int | None:
+    if field_name not in source:
+        return None
+
+    value = source[field_name]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigError(f"O campo '{field_name}' no passo #{step} deve ser inteiro positivo.")
+
+    if value <= 0:
+        raise ConfigError(f"O campo '{field_name}' no passo #{step} deve ser maior que zero.")
+
+    return value
 
 
 def _validate_command(command: str, step: int) -> None:
