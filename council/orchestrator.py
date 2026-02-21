@@ -1,5 +1,5 @@
 from council.state import CouncilState
-from council.executor import Executor, CommandError
+from council.executor import Executor, CommandError, ExecutionAborted
 from council.ui import UI
 from council.config import FlowStep, ConfigError, get_default_flow_steps, render_step_input
 
@@ -54,6 +54,8 @@ class Orchestrator:
             
             self.ui.show_success("Orquestração multimodelo do Council finalizada com sucesso!")
 
+        except ExecutionAborted:
+            self.ui.show_error("Fluxo abortado pelo usuário.")
         except CommandError:
             self.ui.show_error("O fluxo foi interrompido e etapas subsequentes foram abortadas.")
         except ConfigError as exc:
