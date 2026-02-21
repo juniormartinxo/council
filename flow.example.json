@@ -13,7 +13,7 @@
       "key": "critique",
       "agent_name": "Gemini",
       "role_desc": "Crítica",
-      "command": "gemini -p \"\"",
+      "command": "gemini -p {input}",
       "instruction": "Revise o plano e aponte riscos técnicos e de segurança.",
       "input_template": "{instruction}\n\nPlano:\n{plan}",
       "style": "dodger_blue1"
