@@ -32,7 +32,7 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
 
 ---
 
-### SEC-02 — Campo `command` sem validação semântica no parsing (Mitigado em 2026-02-21)
+### SEC-02 — Campo `command` sem validação semântica no parsing (✔️ Mitigado em 2026-02-21)
 
 **Localização:** `council/config.py` — `_parse_step()` e `_validate_command()`.
 
