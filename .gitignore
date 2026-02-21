@@ -40,3 +40,4 @@ htmlcov/
 Thumbs.db
 
 *flow.json
+.council_tui_state.json
