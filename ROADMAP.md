@@ -16,6 +16,7 @@ Antes de avançar em features de alto impacto, a base técnica precisa sustentar
 
 *   **Empacotamento (`pyproject.toml`):** O Council é distribuível como pacote Python com entry-point `council` via `pip install .` ou `pipx install .`. Comando global `council run` e `council tui` funcionam sem `python -m`.
 *   **Diretório de dados do usuário (`COUNCIL_HOME`):** Módulo `paths.py` centraliza caminhos de armazenamento respeitando `XDG_CONFIG_HOME` (Linux), `~/Library/Application Support` (macOS) e `APPDATA` (Windows). O estado da TUI já persiste em `~/.config/council/tui_state.json`.
+*   **Hardening de artefatos locais sensíveis (SEC-05):** Fallback de clipboard migrou de `/tmp` para `COUNCIL_HOME/clipboard`, com permissão `0o600` para arquivos, `0o700` para diretório, cleanup automático por retenção e cobertura em testes da TUI.
 *   **Resolução de configuração em cascata:** O `flow.json` é resolvido automaticamente em 4 níveis: `--flow-config` → `$COUNCIL_FLOW_CONFIG` → `./flow.json` (CWD) → `~/.config/council/flow.json` → default interno.
 *   **Testes automatizados (suite mínima `pytest`):** Base de testes criada em `tests/` com cobertura de smoke tests para `config.py` (parsing de JSON, validação de duplicatas/chaves reservadas, templates e hardening de `command` com `which()` + bloqueio de operadores) e `executor.py` (preparação de comandos, placeholder `{input}`, variações de prompt do Gemini, sucesso/erro/timeout/cancelamento em `run_cli`). `pyproject.toml` atualizado com `project.optional-dependencies.dev` e configuração de `pytest`.
 
