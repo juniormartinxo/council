@@ -35,8 +35,8 @@ Para prover feedback imediato de um gerador generativo (LLM) _sem custo extra_ o
 ## 3. Gestão de Estado Efêmera Baseada em Eventos
 
 Modelos fundacionais via CLI não são desenhados inerentemente com abstrações de `messages[]` e APIs de histórico. Para compensar, foi construído um repositório isolado de contexto (`CouncilState`):
-- Aborda uma `dataclass Turn` que representa o DTO elementar da linha do tempo da arquitetura, gravando emissor, papéis e descrições pragmáticas da ação gerada.
-- Essa matriz sintética se transforma num "payload de strings monolíticas" que antecede todas as próximas execuções via CLI, preservando o contexto arquitetural de um nó anterior para que um novo nó avaliador não necessite recalcular o zero ou desconheça o cenário primário do User.
+- Aborda uma `dataclass Turn` que representa o DTO elementar da linha do tempo da arquitetura, gravando emissor, papéis e descrições pragmáticas da ação gerada. Em caso de intervenções interativas da TUI para refinamento, o feedback humano do Dev consolida seu próprio *Turn* rotulado explicitamente através de ações mapeadas no Histórico, injetando correções no meio da esteira invisivelmente para que a IA reprocessadora a absorva.
+- Essa matriz sintética se transforma num "payload de strings monolíticas" que antecede todas as próximas execuções via CLI, preservando o contexto arquitetural de um nó anterior para que um novo nó avaliador não necessite recalcular do zero ou desconheça o cenário primário do User.
 
 ## 4. Pipeline Dinâmico via Configuração Externa
 
@@ -60,4 +60,4 @@ Ao injetarmos requisições pipeadas `string -> subprocess(cmd)`, sistemas avan�
 Para garantir orquestração fluida em rotinas invisíveis, o orquestrador impõe explicitamente bandeiras mitigadoras (Headless Mode):
 - Codex: Invoca-se através de `codex exec --skip-git-repo-check` para desviar da interface TUI/Menu e anular a validação forçada sobre o repositório Git subjacente.
 - Claude: Adicionado o modo _print_ `-p` estritamente para não invocar prompt de aprovação interativo.
-- Gemini: Executado com `gemini -p {input}` para receber explicitamente o contexto final montado pelo pipeline sem depender do `stdin`.
+- Gemini: Como refinamento da camada de infraestrutura (`executor.py`), o proxy atua interceptando o binário `gemini`. Ele faz o auto-escaping seguro do prompt concatenado pela library `shlex` no momento das invocações como `gemini -p`, neutralizando prompts interativos mal-formados e falhas atreladas a STDIN inexistentes em Subprocessos.
