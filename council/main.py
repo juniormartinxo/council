@@ -27,7 +27,8 @@ def run(
             "-c",
             help=(
                 "Caminho para JSON com a definição de passos. "
-                f"Se omitido, usa o default ou a env var {FLOW_CONFIG_ENV_VAR}."
+                f"Se omitido: {FLOW_CONFIG_ENV_VAR} -> ./flow.json -> "
+                "~/.config/council/flow.json -> default interno."
             ),
         ),
     ] = None,
@@ -68,7 +69,8 @@ def tui(
             "-c",
             help=(
                 "Caminho de configuração opcional para já abrir preenchido na TUI. "
-                f"Ainda respeita {FLOW_CONFIG_ENV_VAR} se não definido."
+                f"Se vazio, a execução seguirá a ordem: {FLOW_CONFIG_ENV_VAR} -> "
+                "./flow.json -> ~/.config/council/flow.json -> default interno."
             ),
         ),
     ] = None,
