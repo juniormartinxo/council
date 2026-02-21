@@ -58,6 +58,7 @@ Execute pelo menos:
 
 ```bash
 python -m compileall council
+pytest -q
 ```
 
 Se as CLIs externas estiverem disponiveis (`claude`, `gemini`, `codex`), rode tambem:
@@ -98,3 +99,4 @@ Ao abrir issue, inclua:
 - Nunca comite chaves, tokens ou credenciais.
 - Nao inclua dados sensiveis em prompts de exemplo.
 - Em mudancas de subprocesso, valide impacto em cancelamento, timeout e modo headless.
+- Em mudancas no parse de `flow.json`, preserve as validacoes de `command` (binario no `PATH`, bloqueio de operadores perigosos e `\n`/`\r`) e atualize `tests/test_config.py`.
