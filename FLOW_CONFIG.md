@@ -86,6 +86,18 @@ Você pode usar:
 - `{instruction}`: conteúdo do próprio campo `instruction`.
 - `{<key_de_passo_anterior>}`: saída de qualquer passo anterior (ex.: `{plan}`, `{code}`).
 
+## 5.1 Placeholder no `command` (`{input}`)
+
+Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o placeholder `{input}` no campo `command`:
+
+```json
+{
+  "command": "gemini -p {input}"
+}
+```
+
+Quando `{input}` está presente, o Council injeta o prompt já escapado no próprio comando e não envia conteúdo via `stdin` para esse passo.
+
 ## 6. Regras de Validação
 
 O carregamento falha com erro claro quando:
@@ -118,7 +130,7 @@ O carregamento falha com erro claro quando:
       "key": "critique",
       "agent_name": "Gemini",
       "role_desc": "Crítica",
-      "command": "gemini -p \"\"",
+      "command": "gemini -p {input}",
       "instruction": "Critique o plano com foco técnico e segurança.",
       "input_template": "{instruction}\n\nPlano:\n{plan}",
       "style": "dodger_blue1"
