@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from council.paths import get_user_flow_config_path
+
 
 FLOW_CONFIG_ENV_VAR = "COUNCIL_FLOW_CONFIG"
 RESERVED_TEMPLATE_KEYS = {"user_prompt", "full_context", "last_output", "instruction"}
@@ -96,18 +98,19 @@ def get_default_flow_steps() -> list[FlowStep]:
 
 
 def load_flow_steps(config_path: str | None) -> list[FlowStep]:
-    selected_path = config_path or os.getenv(FLOW_CONFIG_ENV_VAR)
-    if not selected_path:
+    resolved_path = _resolve_flow_config_path(config_path)
+    if resolved_path is None:
         return get_default_flow_steps()
 
-    path = Path(selected_path).expanduser()
-    if not path.exists():
-        raise ConfigError(f"Arquivo de configuração não encontrado: {path}")
+    try:
+        serialized_payload = resolved_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"Falha ao ler configuração de fluxo em '{resolved_path}': {exc}") from exc
 
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(serialized_payload)
     except json.JSONDecodeError as exc:
-        raise ConfigError(f"JSON inválido em '{path}': {exc.msg}") from exc
+        raise ConfigError(f"JSON inválido em '{resolved_path}': {exc.msg}") from exc
 
     raw_steps = _extract_steps(payload)
     steps = [_parse_step(raw_step, index + 1) for index, raw_step in enumerate(raw_steps)]
@@ -128,6 +131,35 @@ def load_flow_steps(config_path: str | None) -> list[FlowStep]:
         )
 
     return steps
+
+
+def _resolve_flow_config_path(config_path: str | None) -> Path | None:
+    cli_path = (config_path or "").strip()
+    if cli_path:
+        return _validate_config_path(cli_path, source="--flow-config")
+
+    env_path = os.getenv(FLOW_CONFIG_ENV_VAR, "").strip()
+    if env_path:
+        return _validate_config_path(env_path, source=FLOW_CONFIG_ENV_VAR)
+
+    cwd_path = Path.cwd() / "flow.json"
+    if cwd_path.exists():
+        return cwd_path
+
+    user_path = get_user_flow_config_path()
+    if user_path.exists():
+        return user_path
+
+    return None
+
+
+def _validate_config_path(raw_path: str, source: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.exists():
+        raise ConfigError(f"Arquivo de configuração não encontrado ({source}): {path}")
+    if not path.is_file():
+        raise ConfigError(f"O caminho informado ({source}) não é um arquivo: {path}")
+    return path
 
 
 def render_step_input(step: FlowStep, context: Mapping[str, str]) -> str:
