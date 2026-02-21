@@ -39,6 +39,10 @@ python -m council.main run "Prototipe a modelagem de dados para uma rede blockch
 No modo TUI, o fluxo agora roda com **checkpoint humano por etapa**:
 - após cada agente responder, você escolhe `Continuar`, `Enviar ajuste` (reexecuta o mesmo agente) ou `Abortar`.
 
+**Recursos avançados da TUI:**
+- **Atalhos de teclado:** `Ctrl+R` (Executar), `Ctrl+L` (Limpar Logs), `Ctrl+1` (Copiar do log de stream) e `Ctrl+2` (Copiar resultados dos agentes).
+- **Persistência de Sessão:** Suas execuções, histórico de prompts (navegável via setas `Cima`/`Baixo` no input) e arquivos de fluxo são conservados localmente no `.council_tui_state.json`, restaurando seu ambiente na próxima execução.
+
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
 
