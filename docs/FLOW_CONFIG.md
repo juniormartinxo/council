@@ -11,6 +11,14 @@ Você pode sobrescrever o pipeline padrão de agentes de duas formas:
 
 Se nenhuma configuração for fornecida, o Council usa o fluxo default interno.
 
+Quando `--flow-config` não é informado, a ordem de busca automática é:
+1. `COUNCIL_FLOW_CONFIG`;
+2. `./flow.json`;
+3. `~/.config/council/flow.json` (ou equivalente no SO);
+4. fluxo interno default.
+
+Para mudar o diretório base do usuário (incluindo o `flow.json` global), defina `COUNCIL_HOME`.
+
 ## 2. Como Configurar
 
 1. Copie o exemplo:
@@ -24,14 +32,20 @@ cp flow.example.json flow.meu.json
 3. Execute:
 
 ```bash
-python3 -m council.main run "Seu prompt" --flow-config flow.meu.json
+council run "Seu prompt" --flow-config flow.meu.json
+```
+
+Ou, se instalado globalmente:
+
+```bash
+council run "Seu prompt" --flow-config flow.meu.json
 ```
 
 Alternativa via variável de ambiente:
 
 ```bash
 export COUNCIL_FLOW_CONFIG=flow.meu.json
-python3 -m council.main run "Seu prompt"
+council run "Seu prompt"
 ```
 
 ## 3. Estrutura do JSON
