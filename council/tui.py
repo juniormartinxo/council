@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -101,6 +102,9 @@ class CouncilTextualApp(App[None]):
     GENERAL_STEP_ID = "__general__"
     RUN_LABEL_IDLE = "Executar"
     RUN_LABEL_RUNNING = "Executando..."
+    CLIPBOARD_FALLBACK_DIR_NAME = "clipboard"
+    CLIPBOARD_FALLBACK_FILE_PREFIX = "council_"
+    CLIPBOARD_FALLBACK_RETENTION_SECONDS = 60 * 60 * 24 * 7
     BINDINGS = [
         ("ctrl+q", "quit_app", "Fechar"),
         ("ctrl+r", "run_flow", "Executar"),
@@ -609,20 +613,80 @@ class CouncilTextualApp(App[None]):
             self.copy_to_clipboard(payload)
             self.set_status(f"{label} copiado para clipboard.", style="green")
         except Exception:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                prefix=f"council_{safe_label}_",
-                suffix=".txt",
-                dir="/tmp",
-                delete=False,
-            ) as file:
-                file.write(payload)
-                path = file.name
+            try:
+                path, directory_secured = self._save_clipboard_fallback(
+                    payload=payload,
+                    safe_label=safe_label,
+                )
+            except OSError:
+                self.set_status(
+                    "Clipboard indisponível. Falha ao salvar fallback seguro em COUNCIL_HOME.",
+                    style="red",
+                )
+                return
+            warning_suffix = ""
+            if not directory_secured:
+                warning_suffix = " (aviso: permissões do diretório não puderam ser restritas)"
             self.set_status(
-                f"Clipboard indisponível. Conteúdo salvo em {path}",
+                f"Clipboard indisponível. Conteúdo salvo em {path}{warning_suffix}",
                 style="yellow",
             )
+
+    def _save_clipboard_fallback(self, payload: str, safe_label: str) -> tuple[Path, bool]:
+        fallback_dir = self._get_clipboard_fallback_dir()
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        directory_secured = self._secure_directory_permissions(fallback_dir)
+        self._cleanup_clipboard_fallback_files(fallback_dir)
+
+        fd, raw_path = tempfile.mkstemp(
+            prefix=f"{self.CLIPBOARD_FALLBACK_FILE_PREFIX}{safe_label}_",
+            suffix=".txt",
+            dir=str(fallback_dir),
+            text=True,
+        )
+        saved_path = Path(raw_path)
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                file.write(payload)
+        except OSError:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                saved_path.unlink()
+            except OSError:
+                pass
+            raise
+
+        os.chmod(saved_path, 0o600)
+        return saved_path, directory_secured
+
+    def _get_clipboard_fallback_dir(self) -> Path:
+        return get_council_home(create=True) / self.CLIPBOARD_FALLBACK_DIR_NAME
+
+    def _cleanup_clipboard_fallback_files(self, directory: Path, now: float | None = None) -> None:
+        reference_time = now if now is not None else time.time()
+        cutoff = reference_time - self.CLIPBOARD_FALLBACK_RETENTION_SECONDS
+        pattern = f"{self.CLIPBOARD_FALLBACK_FILE_PREFIX}*.txt"
+
+        for candidate in directory.glob(pattern):
+            try:
+                if candidate.is_symlink() or not candidate.is_file():
+                    continue
+                if candidate.stat().st_mtime < cutoff:
+                    candidate.unlink()
+            except OSError:
+                continue
+
+    def _secure_directory_permissions(self, directory: Path) -> bool:
+        try:
+            os.chmod(directory, 0o700)
+            return True
+        except OSError:
+            return False
 
     def _sanitize_filename_segment(self, value: str) -> str:
         allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
