@@ -16,24 +16,34 @@ pip install -r requirements.txt
 > **Aviso Operacional:** Os binários externos essenciais que representam os atores subjacentes à arquitetura (`claude`, `gemini`, `codex`) precisam estar globais ($PATH do OS) ou disponíveis na sessão corrente, sendo invocáveis independentemente do Python.
 
 ## 2. Invocação Principal
-A orquestração do pipeline é iniciada através da invocação do pacote via CLI do Typer e Python, demandando o prompt primário e passando-o para ser triturado na topologia de múltiplos agentes:
+A orquestração do pipeline é iniciada via binário `council`, demandando o prompt primário e passando-o para ser triturado na topologia de múltiplos agentes:
 
 ```bash
 # Formato padrão
-python -m council.main run "<Seu_Prompt_Arquitetural>"
+council run "<Seu_Prompt_Arquitetural>"
 
 # Formato com fluxo customizado (papéis/agentes definidos pelo dev)
-python -m council.main run "<Seu_Prompt_Arquitetural>" --flow-config flow.example.json
+council run "<Seu_Prompt_Arquitetural>" --flow-config flow.example.json
 
 # Modo TUI (Textual)
-python -m council.main tui
+council tui
 
 # Modo TUI já com prompt/flow preenchidos
-python -m council.main tui -p "<Seu_Prompt_Arquitetural>" -c flow.example.json
+council tui -p "<Seu_Prompt_Arquitetural>" -c flow.example.json
 
 # Exemplos Operacionais
-python -m council.main run "Crie um script robusto de backup de sistema"
-python -m council.main run "Prototipe a modelagem de dados para uma rede blockchain simples"
+council run "Crie um script robusto de backup de sistema"
+council run "Prototipe a modelagem de dados para uma rede blockchain simples"
+```
+
+Instalação global recomendada para rodar em qualquer diretório:
+
+```bash
+pipx install .
+
+# Depois de instalado:
+council run "<Seu_Prompt_Arquitetural>"
+council tui
 ```
 
 No modo TUI, os comportamentos atuais são:
@@ -43,7 +53,7 @@ No modo TUI, os comportamentos atuais são:
 - **Abas por step em dois painéis:** tanto em `Stream em tempo real` quanto em `Resultados por etapa`, com aba agregada `Geral`.
 - **Cópia contextual por aba ativa:** `Ctrl+1` copia o conteúdo da aba ativa no painel de stream; `Ctrl+2` copia a aba ativa do painel de resultados.
 - **Fallback de clipboard:** se o terminal não permitir copiar para o clipboard do SO, a TUI salva em `/tmp/council_<stream|resultados>_<timestamp>.txt` e informa o caminho.
-- **Persistência local de sessão:** o arquivo `.council_tui_state.json` guarda o `flow_config` usado por último e o histórico de prompts.
+- **Persistência local de sessão:** o arquivo `tui_state.json` em `~/.config/council/` (ou equivalente do SO) guarda o `flow_config` usado por último e o histórico de prompts.
 - **Histórico de prompt com navegação:** use setas `↑/↓` no input para recuperar prompts anteriores.
 - **Comportamento de abertura:** campo de prompt inicia vazio; campo de flow reabre com o último valor salvo.
 - **Abortar a qualquer momento:** use botão `Abortar` ou `Ctrl+X`; o subprocesso em execução é cancelado de forma ativa.
@@ -83,6 +93,14 @@ Cada passo aceita, entre outros campos:
 ```
 
 Guia completo da feature: `FLOW_CONFIG.md`.
+
+**Resolução automática de fluxo (quando `--flow-config` não é informado):**
+1. variável de ambiente `COUNCIL_FLOW_CONFIG`;
+2. `./flow.json` no diretório atual;
+3. `~/.config/council/flow.json` (ou equivalente no SO);
+4. fluxo default interno.
+
+Você pode sobrescrever o diretório de configuração do usuário com `COUNCIL_HOME`.
 
 ## 5. Práticas de Isolamento e Segurança de CLI
 CLIs modernos muitas vezes atuam como executáveis que lêem e modificam arquivos locais onde o kernel/TUI está operando. O Council injeta _Flags_ para forçar os modos interativos em _Modo Impressão em stdout_ ("Print Mode") anulando capacidades autônomas acidentais, mantendo as execuções isoladas a "Cálculos LLM puros" durante o repasse em lote do _Subprocess Communicator_.
