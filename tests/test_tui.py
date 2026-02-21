@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import council.tui as tui_module
 from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, ResolvedFlowConfig
 from council.paths import COUNCIL_HOME_ENV_VAR
 from council.tui import CouncilTextualApp
@@ -161,3 +162,24 @@ def test_confirm_implicit_flow_for_env_source_requires_confirmation(
     assert second_attempt is True
     assert statuses[-1][1] == "yellow"
     assert "COUNCIL_FLOW_CONFIG" in statuses[-1][0]
+
+
+def test_run_council_flow_handles_invalid_runtime_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    statuses: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        tui_module,
+        "CouncilState",
+        lambda: (_ for _ in ()).throw(ValueError("bad limit")),
+    )
+    monkeypatch.setattr(app, "show_error", lambda message: statuses.append((message, "red")))
+    monkeypatch.setattr(app, "_dispatch_ui", lambda callback, *args: callback(*args))
+    monkeypatch.setattr(app, "_set_running", lambda running: statuses.append((f"running={running}", "state")))
+
+    app.run_council_flow(prompt="prompt", flow_config=None)
+
+    assert any("Configuração inválida de limites" in message for message, _ in statuses)
+    assert ("running=False", "state") in statuses
