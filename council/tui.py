@@ -11,7 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, RichLog, Static
 
 from council.config import ConfigError, load_flow_steps
-from council.executor import Executor
+from council.executor import CommandError, Executor
 from council.orchestrator import Orchestrator
 from council.state import CouncilState
 
@@ -82,6 +82,9 @@ class TextualUIAdapter:
     def show_success(self, message: str) -> None:
         self.app.show_success(message)
 
+    def request_step_feedback(self, agent_name: str, role_desc: str, output: str) -> str | None:
+        return self.app.request_step_feedback(agent_name=agent_name, role_desc=role_desc, output=output)
+
 
 class CouncilTextualApp(App[None]):
     TITLE = "Council TUI"
@@ -149,6 +152,21 @@ class CouncilTextualApp(App[None]):
         background: #202124;
         content-align: left middle;
     }
+
+    #feedback_row {
+        height: auto;
+        padding: 0 1 1 1;
+    }
+
+    #feedback_input {
+        width: 1fr;
+        margin-right: 1;
+    }
+
+    #feedback_hint {
+        width: 1fr;
+        margin-right: 1;
+    }
     """
 
     def __init__(self, initial_prompt: str = "", initial_flow_config: str = ""):
@@ -156,6 +174,9 @@ class CouncilTextualApp(App[None]):
         self._initial_prompt = initial_prompt
         self._initial_flow_config = initial_flow_config
         self._flow_running = False
+        self._awaiting_feedback = False
+        self._feedback_event = threading.Event()
+        self._feedback_value: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -185,6 +206,20 @@ class CouncilTextualApp(App[None]):
             with Vertical(classes="log_col"):
                 yield Static("Resultados por etapa", classes="label")
                 yield RichLog(id="result_log", wrap=True, markup=False, highlight=True)
+
+        with Horizontal(id="feedback_row"):
+            yield Static(
+                "Checkpoint por etapa: aguarde a saída do agente para Continuar ou Enviar ajuste.",
+                id="feedback_hint",
+            )
+            yield Input(
+                placeholder="Escreva um ajuste para o agente atual e pressione Enter",
+                id="feedback_input",
+                disabled=True,
+            )
+            yield Button("Continuar", id="continue_button", disabled=True)
+            yield Button("Enviar ajuste", id="send_feedback_button", disabled=True, variant="primary")
+            yield Button("Abortar", id="abort_button", disabled=True)
 
         yield Static("Pronto.", id="status")
         yield Footer()
@@ -302,6 +337,7 @@ class CouncilTextualApp(App[None]):
         run_button.label = self.RUN_LABEL_RUNNING if running else self.RUN_LABEL_IDLE
         self.query_one("#prompt_input", Input).disabled = running
         self.query_one("#flow_input", Input).disabled = running
+        self.query_one("#clear_button", Button).disabled = running and not self._awaiting_feedback
 
     def _start_execution(self) -> None:
         if self._flow_running:
@@ -329,16 +365,76 @@ class CouncilTextualApp(App[None]):
             self._start_execution()
         elif event.button.id == "clear_button":
             self.clear_logs()
+        elif event.button.id == "continue_button" and self._awaiting_feedback:
+            self._resolve_feedback(None)
+        elif event.button.id == "send_feedback_button" and self._awaiting_feedback:
+            self._submit_feedback_from_input()
+        elif event.button.id == "abort_button" and self._awaiting_feedback:
+            self._resolve_feedback("__ABORT__")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id in {"prompt_input", "flow_input"}:
+        if event.input.id in {"prompt_input", "flow_input"} and not self._awaiting_feedback:
             self._start_execution()
+        elif event.input.id == "feedback_input" and self._awaiting_feedback:
+            self._submit_feedback_from_input()
 
     def action_run_flow(self) -> None:
         self._start_execution()
 
     def action_clear_logs(self) -> None:
         self.clear_logs()
+
+    def request_step_feedback(self, agent_name: str, role_desc: str, output: str) -> str | None:
+        del output
+        self._feedback_event.clear()
+        self._feedback_value = None
+        self._dispatch_ui(self._begin_feedback_mode, agent_name, role_desc)
+        self._feedback_event.wait()
+        selected_feedback = self._feedback_value
+        self._dispatch_ui(self._end_feedback_mode)
+
+        if selected_feedback == "__ABORT__":
+            raise CommandError("Execução abortada pelo usuário.")
+        return selected_feedback
+
+    def _begin_feedback_mode(self, agent_name: str, role_desc: str) -> None:
+        self._awaiting_feedback = True
+        self.query_one("#feedback_hint", Static).update(
+            f"Aguardando você: {agent_name} ({role_desc}). "
+            "Use 'Continuar' para próximo agente ou envie ajuste."
+        )
+        self.query_one("#feedback_input", Input).disabled = False
+        self.query_one("#feedback_input", Input).value = ""
+        self.query_one("#continue_button", Button).disabled = False
+        self.query_one("#send_feedback_button", Button).disabled = False
+        self.query_one("#abort_button", Button).disabled = False
+        self.query_one("#clear_button", Button).disabled = True
+        self.set_status("Checkpoint humano ativo.", style="yellow")
+        self.query_one("#feedback_input", Input).focus()
+
+    def _end_feedback_mode(self) -> None:
+        self._awaiting_feedback = False
+        self.query_one("#feedback_hint", Static).update(
+            "Checkpoint por etapa: aguarde a saída do agente para Continuar ou Enviar ajuste."
+        )
+        self.query_one("#feedback_input", Input).disabled = True
+        self.query_one("#feedback_input", Input).value = ""
+        self.query_one("#continue_button", Button).disabled = True
+        self.query_one("#send_feedback_button", Button).disabled = True
+        self.query_one("#abort_button", Button).disabled = True
+        self.query_one("#clear_button", Button).disabled = self._flow_running
+        self.set_status("Executando próximo passo...", style="yellow")
+
+    def _submit_feedback_from_input(self) -> None:
+        feedback = self.query_one("#feedback_input", Input).value.strip()
+        if not feedback:
+            self.set_status("Digite um ajuste ou use 'Continuar'.", style="yellow")
+            return
+        self._resolve_feedback(feedback)
+
+    def _resolve_feedback(self, value: str | None) -> None:
+        self._feedback_value = value
+        self._feedback_event.set()
 
     def run_council_flow(self, prompt: str, flow_config: str | None) -> None:
         ui = TextualUIAdapter(self)
@@ -359,6 +455,7 @@ class CouncilTextualApp(App[None]):
         except Exception as exc:
             ui.show_error(f"Erro inesperado na execução: {exc}")
         finally:
+            self._feedback_event.set()
             self._dispatch_ui(self._set_running, False)
 
 
