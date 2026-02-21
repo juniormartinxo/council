@@ -77,8 +77,12 @@ def run(
     - um fluxo customizado via JSON.
     """
     ui = UI()
-    state = CouncilState()
-    executor = Executor(ui)
+    try:
+        state = CouncilState()
+        executor = Executor(ui)
+    except ValueError as exc:
+        ui.show_error(f"Configuração inválida de limites: {exc}")
+        raise typer.Exit(code=1)
 
     try:
         resolved_config = resolve_flow_config(flow_config)
