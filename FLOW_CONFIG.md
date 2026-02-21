@@ -66,7 +66,7 @@ Exemplo com `steps`:
 - `role_desc` (obrigatório): descrição do papel exibida na UI.
 - `command` (obrigatório): comando CLI da IA/ferramenta.
 - `instruction` (obrigatório): instrução principal do passo.
-- `input_template` (opcional): template do prompt enviado ao comando.
+- `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
 - `is_code` (opcional, boolean): trata saída como código para renderização.
 
@@ -86,7 +86,7 @@ Você pode usar:
 - `{instruction}`: conteúdo do próprio campo `instruction`.
 - `{<key_de_passo_anterior>}`: saída de qualquer passo anterior (ex.: `{plan}`, `{code}`).
 
-## 5.1 Placeholder no `command` (`{input}`)
+## 5.1 Placeholder no `command` e Autocompletar Gemini
 
 Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o placeholder `{input}` no campo `command`:
 
@@ -97,6 +97,8 @@ Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o plac
 ```
 
 Quando `{input}` está presente, o Council injeta o prompt já escapado no próprio comando e não envia conteúdo via `stdin` para esse passo.
+
+**Especial para Gemini**: Como conveniência extra, se você configurar o comando estritamente como `gemini -p` ou `gemini --prompt` (sem indicar o valor e sem usar explicitamente o placeholder `{input}`), o executor irá detectar esse padrão automaticamente. Ele tratará a sintaxe anexando o payload escapado no final do comando de forma invisível.
 
 ## 6. Regras de Validação
 
