@@ -41,6 +41,7 @@ No modo TUI, o fluxo agora roda com **checkpoint humano por etapa**:
 
 **Recursos avançados da TUI:**
 - **Atalhos de teclado:** `Ctrl+R` (Executar), `Ctrl+L` (Limpar Logs), `Ctrl+1` (Copiar do log de stream) e `Ctrl+2` (Copiar resultados dos agentes).
+  - *Fallback de Copy/Clipboard:* Em terminais puros e remotizados por SSH (onde o hardware de Clipboard do Sistema Operacional falha na extração TUI), a interface engatilhará um despejo de salvaguarda, criando o artefato em `/tmp/council_<stream|resultados>_<timestamp>.txt`.
 - **Persistência de Sessão:** Suas execuções, histórico de prompts (navegável via setas `Cima`/`Baixo` no input) e arquivos de fluxo são conservados localmente no `.council_tui_state.json`, restaurando seu ambiente na próxima execução.
 
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
