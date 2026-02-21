@@ -1,0 +1,165 @@
+# Configuração de Fluxo de Agentes
+
+Este guia documenta a feature de fluxo configurável do Council, que permite definir qual IA executa cada papel sem alterar código Python.
+
+## 1. Visão Geral
+
+Você pode sobrescrever o pipeline padrão de agentes de duas formas:
+
+1. `--flow-config <arquivo.json>` na execução.
+2. Variável de ambiente `COUNCIL_FLOW_CONFIG`.
+
+Se nenhuma configuração for fornecida, o Council usa o fluxo default interno.
+
+## 2. Como Configurar
+
+1. Copie o exemplo:
+
+```bash
+cp flow.example.json flow.meu.json
+```
+
+2. Edite `flow.meu.json` com os agentes/papéis desejados.
+
+3. Execute:
+
+```bash
+python3 -m council.main run "Seu prompt" --flow-config flow.meu.json
+```
+
+Alternativa via variável de ambiente:
+
+```bash
+export COUNCIL_FLOW_CONFIG=flow.meu.json
+python3 -m council.main run "Seu prompt"
+```
+
+## 3. Estrutura do JSON
+
+O arquivo pode ser:
+
+1. Um objeto com a chave `steps`.
+2. Uma lista direta de passos.
+
+Exemplo com `steps`:
+
+```json
+{
+  "steps": [
+    {
+      "key": "plan",
+      "agent_name": "Claude",
+      "role_desc": "Planejamento",
+      "command": "claude -p",
+      "instruction": "Gere um plano técnico.",
+      "input_template": "{instruction}\n\nRequisito:\n{user_prompt}",
+      "style": "dark_goldenrod"
+    }
+  ]
+}
+```
+
+## 4. Campos de Cada Passo
+
+- `key` (opcional): identificador da saída do passo. Se omitido, vira `step_N`.
+- `agent_name` (obrigatório): nome exibido na UI.
+- `role_desc` (obrigatório): descrição do papel exibida na UI.
+- `command` (obrigatório): comando CLI da IA/ferramenta.
+- `instruction` (obrigatório): instrução principal do passo.
+- `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
+- `style` (opcional): cor do painel Rich.
+- `is_code` (opcional, boolean): trata saída como código para renderização.
+
+Alias suportados:
+
+- `key` também pode ser `id`.
+- `agent_name` também pode ser `agent`.
+- `role_desc` também pode ser `role`.
+
+## 5. Placeholders no `input_template`
+
+Você pode usar:
+
+- `{user_prompt}`: prompt original do usuário.
+- `{full_context}`: histórico completo acumulado.
+- `{last_output}`: saída do passo imediatamente anterior.
+- `{instruction}`: conteúdo do próprio campo `instruction`.
+- `{<key_de_passo_anterior>}`: saída de qualquer passo anterior (ex.: `{plan}`, `{code}`).
+
+## 5.1 Placeholder no `command` e Autocompletar Gemini
+
+Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o placeholder `{input}` no campo `command`:
+
+```json
+{
+  "command": "gemini -p {input}"
+}
+```
+
+Quando `{input}` está presente, o Council injeta o prompt já escapado no próprio comando e não envia conteúdo via `stdin` para esse passo.
+
+**Especial para Gemini**: Como conveniência extra, se você configurar o comando estritamente como `gemini -p` ou `gemini --prompt` (sem indicar o valor e sem usar explicitamente o placeholder `{input}`), o executor irá detectar esse padrão automaticamente. Ele tratará a sintaxe anexando o payload escapado no final do comando de forma invisível.
+
+## 6. Regras de Validação
+
+O carregamento falha com erro claro quando:
+
+1. O arquivo JSON não existe.
+2. O JSON é inválido.
+3. `steps` está ausente (quando objeto) ou formato não é lista.
+4. Não há nenhum passo.
+5. Campos obrigatórios não existem ou não são string.
+6. `is_code` não é boolean.
+7. Há `key` duplicada.
+8. A `key` usa nome reservado: `user_prompt`, `full_context`, `last_output`, `instruction`.
+9. O `input_template` referencia placeholder inexistente.
+
+## 7. Exemplo Completo
+
+```json
+{
+  "steps": [
+    {
+      "key": "plan",
+      "agent_name": "Claude",
+      "role_desc": "Planejamento",
+      "command": "claude -p",
+      "instruction": "Você é um arquiteto. Crie um plano.",
+      "input_template": "{instruction}\n\n{user_prompt}",
+      "style": "dark_goldenrod"
+    },
+    {
+      "key": "critique",
+      "agent_name": "Gemini",
+      "role_desc": "Crítica",
+      "command": "gemini -p {input}",
+      "instruction": "Critique o plano com foco técnico e segurança.",
+      "input_template": "{instruction}\n\nPlano:\n{plan}",
+      "style": "dodger_blue1"
+    },
+    {
+      "key": "implement",
+      "agent_name": "Codex",
+      "role_desc": "Implementação",
+      "command": "codex exec --skip-git-repo-check",
+      "instruction": "Implemente com base no plano e na crítica. Retorne só código.",
+      "input_template": "{instruction}\n\nPlano:\n{plan}\n\nCrítica:\n{critique}",
+      "is_code": true,
+      "style": "bright_black"
+    },
+    {
+      "key": "review",
+      "agent_name": "Claude",
+      "role_desc": "Revisão Final",
+      "command": "claude -p",
+      "instruction": "Faça um review do código e priorize melhorias.",
+      "input_template": "{instruction}\n\nCódigo:\n{implement}",
+      "style": "dark_goldenrod"
+    }
+  ]
+}
+```
+
+## 8. Dica Operacional
+
+Para validar seu fluxo sem depender de provedores externos, use temporariamente um passo com `command: "cat"` e verifique se os templates estão sendo montados corretamente.
