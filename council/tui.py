@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
-from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -608,10 +609,16 @@ class CouncilTextualApp(App[None]):
             self.copy_to_clipboard(payload)
             self.set_status(f"{label} copiado para clipboard.", style="green")
         except Exception:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = f"/tmp/council_{safe_label}_{timestamp}.txt"
-            with open(path, "w", encoding="utf-8") as file:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                prefix=f"council_{safe_label}_",
+                suffix=".txt",
+                dir="/tmp",
+                delete=False,
+            ) as file:
                 file.write(payload)
+                path = file.name
             self.set_status(
                 f"Clipboard indisponível. Conteúdo salvo em {path}",
                 style="yellow",
@@ -686,12 +693,29 @@ class CouncilTextualApp(App[None]):
             "prompt_history": self._prompt_history,
         }
 
+        temp_path: str | None = None
         try:
-            self.STATE_FILE_PATH.write_text(
-                json.dumps(state_payload, ensure_ascii=False, indent=2),
+            serialized_payload = json.dumps(state_payload, ensure_ascii=False, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
                 encoding="utf-8",
-            )
+                prefix=f".{self.STATE_FILE_PATH.name}.",
+                suffix=".tmp",
+                dir=str(self.STATE_FILE_PATH.parent),
+                delete=False,
+            ) as temp_file:
+                temp_file.write(serialized_payload)
+                temp_path = temp_file.name
+
+            os.chmod(temp_path, 0o600)
+            os.replace(temp_path, self.STATE_FILE_PATH)
+            os.chmod(self.STATE_FILE_PATH, 0o600)
         except OSError:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
             pass
 
     def _safe_input_value(self, input_id: str, fallback: str) -> str:
