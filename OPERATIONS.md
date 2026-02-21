@@ -25,6 +25,12 @@ python -m council.main run "<Seu_Prompt_Arquitetural>"
 # Formato com fluxo customizado (papéis/agentes definidos pelo dev)
 python -m council.main run "<Seu_Prompt_Arquitetural>" --flow-config flow.example.json
 
+# Modo TUI (Textual)
+python -m council.main tui
+
+# Modo TUI já com prompt/flow preenchidos
+python -m council.main tui -p "<Seu_Prompt_Arquitetural>" -c flow.example.json
+
 # Exemplos Operacionais
 python -m council.main run "Crie um script robusto de backup de sistema"
 python -m council.main run "Prototipe a modelagem de dados para uma rede blockchain simples"
