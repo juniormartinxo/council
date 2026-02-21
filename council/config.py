@@ -5,12 +5,18 @@ import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from council.paths import get_user_flow_config_path
 
 
 FLOW_CONFIG_ENV_VAR = "COUNCIL_FLOW_CONFIG"
+FLOW_CONFIG_SOURCE_CLI = "cli"
+FLOW_CONFIG_SOURCE_ENV = "env"
+FLOW_CONFIG_SOURCE_CWD = "cwd"
+FLOW_CONFIG_SOURCE_USER = "user"
+FLOW_CONFIG_SOURCE_DEFAULT = "default"
+FlowConfigSource = Literal["cli", "env", "cwd", "user", "default"]
 RESERVED_TEMPLATE_KEYS = {"user_prompt", "full_context", "last_output", "instruction"}
 DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\n"), "\\n"),
@@ -19,10 +25,14 @@ DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r";"), ";"),
     (re.compile(r"\|"), "|"),
     (re.compile(r"`"), "`"),
+    (re.compile(r"\$\{"), "${"),
+    (re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*"), "$VAR"),
     (re.compile(r"\$\("), "$("),
+    (re.compile(r"(^|\s)~(?=/|$)"), "~"),
     (re.compile(r">>"), ">>"),
     (re.compile(r"(?<!>)>(?!>)"), ">"),
 )
+ALLOWED_COMMAND_BINARIES = frozenset({"claude", "gemini", "codex", "ollama"})
 
 
 class ConfigError(Exception):
@@ -39,6 +49,12 @@ class FlowStep:
     input_template: str = "{instruction}\n\n{full_context}"
     style: str = "blue"
     is_code: bool = False
+
+
+@dataclass(frozen=True)
+class ResolvedFlowConfig:
+    path: Path | None
+    source: FlowConfigSource
 
 
 def get_default_flow_steps() -> list[FlowStep]:
@@ -111,8 +127,12 @@ def get_default_flow_steps() -> list[FlowStep]:
     ]
 
 
-def load_flow_steps(config_path: str | None) -> list[FlowStep]:
-    resolved_path = _resolve_flow_config_path(config_path)
+def load_flow_steps(
+    config_path: str | None,
+    resolved_config: ResolvedFlowConfig | None = None,
+) -> list[FlowStep]:
+    selected_config = resolved_config or resolve_flow_config(config_path)
+    resolved_path = selected_config.path
     if resolved_path is None:
         return get_default_flow_steps()
 
@@ -147,24 +167,30 @@ def load_flow_steps(config_path: str | None) -> list[FlowStep]:
     return steps
 
 
-def _resolve_flow_config_path(config_path: str | None) -> Path | None:
+def resolve_flow_config(config_path: str | None) -> ResolvedFlowConfig:
     cli_path = (config_path or "").strip()
     if cli_path:
-        return _validate_config_path(cli_path, source="--flow-config")
+        validated_path = _validate_config_path(cli_path, source="--flow-config")
+        return ResolvedFlowConfig(path=validated_path, source=FLOW_CONFIG_SOURCE_CLI)
 
     env_path = os.getenv(FLOW_CONFIG_ENV_VAR, "").strip()
     if env_path:
-        return _validate_config_path(env_path, source=FLOW_CONFIG_ENV_VAR)
+        validated_path = _validate_config_path(env_path, source=FLOW_CONFIG_ENV_VAR)
+        return ResolvedFlowConfig(path=validated_path, source=FLOW_CONFIG_SOURCE_ENV)
 
     cwd_path = Path.cwd() / "flow.json"
     if cwd_path.exists():
-        return cwd_path
+        return ResolvedFlowConfig(path=cwd_path, source=FLOW_CONFIG_SOURCE_CWD)
 
     user_path = get_user_flow_config_path()
     if user_path.exists():
-        return user_path
+        return ResolvedFlowConfig(path=user_path, source=FLOW_CONFIG_SOURCE_USER)
 
-    return None
+    return ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT)
+
+
+def _resolve_flow_config_path(config_path: str | None) -> Path | None:
+    return resolve_flow_config(config_path).path
 
 
 def _validate_config_path(raw_path: str, source: str) -> Path:
@@ -278,9 +304,21 @@ def _validate_command(command: str, step: int) -> None:
         raise ConfigError(f"O campo 'command' no passo #{step} não pode ser vazio.")
 
     binary = tokens[0]
+    if "/" in binary or "\\" in binary:
+        raise ConfigError(
+            f"O campo 'command' no passo #{step} deve usar apenas o nome do binário, sem caminho explícito: '{binary}'."
+        )
+
     if shutil.which(binary) is None:
         raise ConfigError(
             f"O campo 'command' no passo #{step} usa binário inexistente no PATH: '{binary}'."
+        )
+
+    if binary not in ALLOWED_COMMAND_BINARIES:
+        allowed_bins_text = ", ".join(sorted(ALLOWED_COMMAND_BINARIES))
+        raise ConfigError(
+            f"O campo 'command' no passo #{step} usa binário não permitido: '{binary}'. "
+            f"Permitidos: {allowed_bins_text}."
         )
 
 
