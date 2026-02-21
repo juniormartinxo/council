@@ -51,6 +51,8 @@ Cada passo define:
 
 O `input_template` suporta placeholders como `{user_prompt}`, `{full_context}`, `{last_output}` e qualquer `key` já produzido anteriormente (`{plan}`, `{code}`, etc.), permitindo que o dev decida qual IA assume cada papel sem alterar o core.
 
+No carregamento de `flow.json`, o `config.py` tambem aplica validacao semantica do `command` (sintaxe shell valida, binario presente no `PATH` e bloqueio de operadores perigosos/quebras de linha) antes da execucao do passo.
+
 Para formato, exemplos e validações operacionais, consulte `FLOW_CONFIG.md`.
 
 ## 5. Integração Headless & TUI-Bypassing
