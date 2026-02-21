@@ -43,6 +43,7 @@ A biblioteca `rich` e o `typer` compõem a porta de entrada.
 | **Python 3.10+** | Core languange focado em Type Hinting modernos (`typing_extensions.Annotated`). |
 | **Typer** | Roteamento nativo e performático de argumentos via Python types. |
 | **Rich** | Controle de Buffer de frame do Terminal (Painéis, Syntax Highlighting, Spinners, Live Updates). |
+| **Textual** | Interface TUI interativa para executar o mesmo fluxo multimodelo com painel de stream e resultados. |
 | **Subprocess** | Integração em baixo nível de Pipes SO Popen (`stdin`, `stdout`, `stderr`). |
 | **OOP / SOLID** | Padrões de classes dedicados a Responsabilidade Única (UI, Estado, Execução Pura). |
 
@@ -94,7 +95,7 @@ O ambiente não exige o uso do LangChain. Tudo se resume a ferramentas CLI padro
 python3 -m venv venv
 source venv/bin/activate
 
-# Instalação das dependências (Rich, Typer etc)
+# Instalação das dependências (Rich, Typer, Textual etc)
 pip install -r requirements.txt
 
 # Dispara a orquestração enviando o STDIN global para os sub-nós
@@ -102,6 +103,9 @@ python -m council.main run "Crie um algoritmo distribuido de map-reduce"
 
 # Dispara com fluxo customizado (escolhendo IAs/papéis livremente)
 python -m council.main run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.example.json
+
+# Abre a TUI interativa (Textual)
+python -m council.main tui
 ```
 
 ---
