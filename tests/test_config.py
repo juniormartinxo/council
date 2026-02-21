@@ -3,9 +3,23 @@ from pathlib import Path
 
 import pytest
 
+import council.config as config_module
 from council.config import ConfigError, FlowStep, load_flow_steps, render_step_input
 from council.config import FLOW_CONFIG_ENV_VAR
 from council.paths import COUNCIL_HOME_ENV_VAR
+
+
+@pytest.fixture(autouse=True)
+def mock_command_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    known_bins = {
+        "cat": "/usr/bin/cat",
+        "claude": "/usr/local/bin/claude",
+        "codex": "/usr/local/bin/codex",
+        "echo": "/usr/bin/echo",
+        "gemini": "/usr/local/bin/gemini",
+    }
+
+    monkeypatch.setattr("council.config.shutil.which", lambda binary: known_bins.get(binary))
 
 
 def _step_payload(key: str = "step_1", **overrides: object) -> dict[str, object]:
@@ -120,6 +134,52 @@ def test_load_flow_steps_parses_alias_fields_and_is_code(tmp_path: Path) -> None
     assert steps[0].agent_name == "Codex"
     assert steps[0].role_desc == "Implementacao"
     assert steps[0].is_code is True
+
+
+@pytest.mark.parametrize(
+    ("command", "operator"),
+    [
+        ("echo ok | cat", "|"),
+        ("echo ok && cat", "&&"),
+        ("echo ok;cat", ";"),
+        ("echo `whoami`", "`"),
+        ("echo $(whoami)", "$("),
+        ("echo ok > /tmp/x", ">"),
+        ("echo ok >> /tmp/x", ">>"),
+        ("echo ok\nwhoami", "\\n"),
+        ("echo ok\rwhoami", "\\r"),
+    ],
+)
+def test_load_flow_steps_raises_on_disallowed_shell_operators(
+    tmp_path: Path, command: str, operator: str
+) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command=command)])
+
+    with pytest.raises(ConfigError, match="operadores de shell não permitidos") as exc_info:
+        load_flow_steps(str(path))
+    assert operator in str(exc_info.value)
+
+
+def test_load_flow_steps_raises_on_unknown_command_binary(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="missing_binary --flag")])
+
+    with pytest.raises(ConfigError, match="binário inexistente no PATH"):
+        load_flow_steps(str(path))
+
+
+def test_load_flow_steps_raises_on_invalid_command_syntax(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="echo 'unterminated")])
+
+    with pytest.raises(ConfigError, match="sintaxe inválida"):
+        load_flow_steps(str(path))
+
+
+def test_default_flow_commands_follow_validation_rules() -> None:
+    for index, step in enumerate(config_module.get_default_flow_steps(), start=1):
+        config_module._validate_command(step.command, step=index)
 
 
 def test_render_step_input_raises_for_missing_template_variable() -> None:
