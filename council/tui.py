@@ -943,8 +943,13 @@ class CouncilTextualApp(App[None]):
         resolved_flow_config: ResolvedFlowConfig | None = None,
     ) -> None:
         ui = TextualUIAdapter(self)
-        state = CouncilState()
-        executor = Executor(ui)
+        try:
+            state = CouncilState()
+            executor = Executor(ui)
+        except ValueError as exc:
+            ui.show_error(f"Configuração inválida de limites: {exc}")
+            self._dispatch_ui(self._set_running, False)
+            return
         with self._executor_lock:
             self._active_executor = executor
 
