@@ -16,6 +16,7 @@ from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Tab,
 from council.config import ConfigError, load_flow_steps
 from council.executor import CommandError, ExecutionAborted, Executor
 from council.orchestrator import Orchestrator
+from council.paths import get_council_home, get_tui_state_file_path
 from council.state import CouncilState
 
 
@@ -95,8 +96,7 @@ class TextualUIAdapter:
 class CouncilTextualApp(App[None]):
     TITLE = "Council TUI"
     SUB_TITLE = "Orquestrador Multi-Agent"
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
-    STATE_FILE_PATH = PROJECT_ROOT / ".council_tui_state.json"
+    STATE_FILE_PATH = get_tui_state_file_path()
     MAX_HISTORY_ITEMS = 200
     GENERAL_STEP_ID = "__general__"
     RUN_LABEL_IDLE = "Executar"
@@ -695,6 +695,7 @@ class CouncilTextualApp(App[None]):
 
         temp_path: str | None = None
         try:
+            get_council_home(create=True)
             serialized_payload = json.dumps(state_payload, ensure_ascii=False, indent=2)
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -725,10 +726,13 @@ class CouncilTextualApp(App[None]):
             return fallback
 
     def _load_persisted_state(self) -> dict[str, object]:
+        return self._read_state_payload(self.STATE_FILE_PATH)
+
+    def _read_state_payload(self, path: Path) -> dict[str, object]:
         try:
-            if not self.STATE_FILE_PATH.exists():
+            if not path.exists():
                 return {}
-            payload = json.loads(self.STATE_FILE_PATH.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
             return payload if isinstance(payload, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
