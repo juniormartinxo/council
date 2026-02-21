@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+import typer
+
 import council.main as main_module
 from council.config import (
     FLOW_CONFIG_SOURCE_CLI,
@@ -9,6 +12,14 @@ from council.config import (
     FLOW_CONFIG_SOURCE_USER,
     ResolvedFlowConfig,
 )
+
+
+class _DummyUI:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def show_error(self, message: str) -> None:
+        self.errors.append(message)
 
 
 def test_requires_implicit_flow_confirmation_for_cwd_and_env() -> None:
@@ -55,3 +66,21 @@ def test_confirm_implicit_flow_execution_calls_typer_confirm(monkeypatch) -> Non
     assert captured["default"] is False
     assert captured["show_default"] is True
     assert "COUNCIL_FLOW_CONFIG" in str(captured["message"])
+
+
+def test_run_exits_when_runtime_limits_config_is_invalid(monkeypatch) -> None:
+    ui = _DummyUI()
+
+    monkeypatch.setattr(main_module, "UI", lambda: ui)
+    monkeypatch.setattr(
+        main_module,
+        "CouncilState",
+        lambda: (_ for _ in ()).throw(ValueError("bad limit")),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        main_module.run(prompt="prompt", flow_config=None)
+
+    assert exc_info.value.exit_code == 1
+    assert len(ui.errors) == 1
+    assert "Configuração inválida de limites" in ui.errors[0]
