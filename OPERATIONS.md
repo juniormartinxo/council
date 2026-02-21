@@ -36,13 +36,18 @@ python -m council.main run "Crie um script robusto de backup de sistema"
 python -m council.main run "Prototipe a modelagem de dados para uma rede blockchain simples"
 ```
 
-No modo TUI, o fluxo agora roda com **checkpoint humano por etapa**:
-- após cada agente responder, você escolhe `Continuar`, `Enviar ajuste` (reexecuta o mesmo agente) ou `Abortar`.
+No modo TUI, os comportamentos atuais são:
 
-**Recursos avançados da TUI:**
-- **Atalhos de teclado:** `Ctrl+R` (Executar), `Ctrl+L` (Limpar Logs), `Ctrl+1` (Copiar do log de stream) e `Ctrl+2` (Copiar resultados dos agentes).
-  - *Fallback de Copy/Clipboard:* Em terminais puros e remotizados por SSH (onde o hardware de Clipboard do Sistema Operacional falha na extração TUI), a interface engatilhará um despejo de salvaguarda, criando o artefato em `/tmp/council_<stream|resultados>_<timestamp>.txt`.
-- **Persistência de Sessão:** Suas execuções, histórico de prompts (navegável via setas `Cima`/`Baixo` no input) e arquivos de fluxo são conservados localmente no `.council_tui_state.json`, restaurando seu ambiente na próxima execução.
+- **Execução do fluxo:** por botão `Executar`, tecla `Enter` no campo de prompt ou `Ctrl+R`.
+- **Checkpoint humano por etapa:** após cada agente, escolha `Continuar`, `Enviar ajuste` (reexecuta o mesmo step com feedback) ou `Abortar`.
+- **Abas por step em dois painéis:** tanto em `Stream em tempo real` quanto em `Resultados por etapa`, com aba agregada `Geral`.
+- **Cópia contextual por aba ativa:** `Ctrl+1` copia o conteúdo da aba ativa no painel de stream; `Ctrl+2` copia a aba ativa do painel de resultados.
+- **Fallback de clipboard:** se o terminal não permitir copiar para o clipboard do SO, a TUI salva em `/tmp/council_<stream|resultados>_<timestamp>.txt` e informa o caminho.
+- **Persistência local de sessão:** o arquivo `.council_tui_state.json` guarda o `flow_config` usado por último e o histórico de prompts.
+- **Histórico de prompt com navegação:** use setas `↑/↓` no input para recuperar prompts anteriores.
+- **Comportamento de abertura:** campo de prompt inicia vazio; campo de flow reabre com o último valor salvo.
+- **Abortar a qualquer momento:** use botão `Abortar` ou `Ctrl+X`; o subprocesso em execução é cancelado de forma ativa.
+- **Fechar a aplicação:** `Ctrl+Q`.
 
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
