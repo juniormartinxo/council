@@ -6,13 +6,11 @@ from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
 
-from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Footer, Header, Input, RichLog, Static
+from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Tab, Tabs
 
 from council.config import ConfigError, load_flow_steps
 from council.executor import CommandError, Executor
@@ -89,6 +87,9 @@ class TextualUIAdapter:
     def request_step_feedback(self, agent_name: str, role_desc: str, output: str) -> str | None:
         return self.app.request_step_feedback(agent_name=agent_name, role_desc=role_desc, output=output)
 
+    def set_active_step(self, step_key: str, label: str) -> None:
+        self.app.set_active_step(step_key=step_key, label=label)
+
 
 class CouncilTextualApp(App[None]):
     TITLE = "Council TUI"
@@ -96,6 +97,7 @@ class CouncilTextualApp(App[None]):
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
     STATE_FILE_PATH = PROJECT_ROOT / ".council_tui_state.json"
     MAX_HISTORY_ITEMS = 200
+    GENERAL_STEP_ID = "__general__"
     RUN_LABEL_IDLE = "Executar"
     RUN_LABEL_RUNNING = "Executando..."
     BINDINGS = [
@@ -164,6 +166,11 @@ class CouncilTextualApp(App[None]):
         margin-left: 1;
     }
 
+    #stream_tabs,
+    #result_tabs {
+        margin: 0 0 1 0;
+    }
+
     #status {
         height: 3;
         padding: 0 1;
@@ -199,8 +206,12 @@ class CouncilTextualApp(App[None]):
         self._awaiting_feedback = False
         self._feedback_event = threading.Event()
         self._feedback_value: str | None = None
-        self._stream_buffer: list[str] = []
-        self._result_buffer: list[str] = []
+        self._stream_buffers: dict[str, list[str]] = {self.GENERAL_STEP_ID: []}
+        self._result_buffers: dict[str, list[str]] = {self.GENERAL_STEP_ID: []}
+        self._step_labels: dict[str, str] = {self.GENERAL_STEP_ID: "Geral"}
+        self._stream_selected_step_id = self.GENERAL_STEP_ID
+        self._result_selected_step_id = self.GENERAL_STEP_ID
+        self._current_step_id = self.GENERAL_STEP_ID
         self._prompt_history = self._normalize_prompt_history(persisted_state.get("prompt_history"))
         self._history_index = len(self._prompt_history)
         self._history_draft = ""
@@ -230,12 +241,14 @@ class CouncilTextualApp(App[None]):
                 with Horizontal(classes="log_header"):
                     yield Static("Stream em tempo real", classes="label")
                     yield Button("Copiar", id="copy_stream_button", classes="copy_btn")
+                yield Tabs(Tab("Geral", id="stream_tab__general"), id="stream_tabs")
                 yield RichLog(id="stream_log", wrap=True, markup=False, highlight=False)
 
             with Vertical(classes="log_col"):
                 with Horizontal(classes="log_header"):
                     yield Static("Resultados por etapa", classes="label")
                     yield Button("Copiar", id="copy_results_button", classes="copy_btn")
+                yield Tabs(Tab("Geral", id="result_tab__general"), id="result_tabs")
                 yield RichLog(id="result_log", wrap=True, markup=False, highlight=True)
 
         with Horizontal(id="feedback_row"):
@@ -291,6 +304,108 @@ class CouncilTextualApp(App[None]):
     def _result_log(self) -> RichLog:
         return self.query_one("#result_log", RichLog)
 
+    def _stream_tabs(self) -> Tabs:
+        return self.query_one("#stream_tabs", Tabs)
+
+    def _result_tabs(self) -> Tabs:
+        return self.query_one("#result_tabs", Tabs)
+
+    def _tab_id(self, prefix: str, step_id: str) -> str:
+        if step_id == self.GENERAL_STEP_ID:
+            return f"{prefix}__general"
+        return f"{prefix}__{step_id}"
+
+    def _step_from_tab_id(self, tab_id: str, prefix: str) -> str:
+        prefix_with_sep = f"{prefix}__"
+        if not tab_id.startswith(prefix_with_sep):
+            return self.GENERAL_STEP_ID
+        raw_step = tab_id[len(prefix_with_sep) :]
+        return self.GENERAL_STEP_ID if raw_step == "general" else raw_step
+
+    def set_active_step(self, step_key: str, label: str) -> None:
+        self._dispatch_ui(self._set_active_step, step_key, label)
+
+    def _set_active_step(self, step_key: str, label: str) -> None:
+        normalized_step = step_key.strip() or self.GENERAL_STEP_ID
+        self._current_step_id = normalized_step
+        self._step_labels[normalized_step] = label
+        self._ensure_step_tabs(normalized_step, label)
+
+        self._stream_tabs().active = self._tab_id("stream_tab", normalized_step)
+        self._result_tabs().active = self._tab_id("result_tab", normalized_step)
+
+    def _ensure_step_tabs(self, step_id: str, label: str) -> None:
+        if step_id not in self._stream_buffers:
+            self._stream_buffers[step_id] = []
+        if step_id not in self._result_buffers:
+            self._result_buffers[step_id] = []
+
+        stream_tab_ids = {tab.id for tab in self._stream_tabs().query("Tab")}
+        stream_tab_id = self._tab_id("stream_tab", step_id)
+        if stream_tab_id not in stream_tab_ids:
+            self._stream_tabs().add_tab(Tab(label, id=stream_tab_id))
+
+        result_tab_ids = {tab.id for tab in self._result_tabs().query("Tab")}
+        result_tab_id = self._tab_id("result_tab", step_id)
+        if result_tab_id not in result_tab_ids:
+            self._result_tabs().add_tab(Tab(label, id=result_tab_id))
+
+    def _reset_tabs(self) -> None:
+        stream_tabs = self._stream_tabs()
+        result_tabs = self._result_tabs()
+
+        for tab in list(stream_tabs.query("Tab")):
+            if tab.id != self._tab_id("stream_tab", self.GENERAL_STEP_ID):
+                stream_tabs.remove_tab(tab.id)
+
+        for tab in list(result_tabs.query("Tab")):
+            if tab.id != self._tab_id("result_tab", self.GENERAL_STEP_ID):
+                result_tabs.remove_tab(tab.id)
+
+        stream_tabs.active = self._tab_id("stream_tab", self.GENERAL_STEP_ID)
+        result_tabs.active = self._tab_id("result_tab", self.GENERAL_STEP_ID)
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tab.id is None:
+            return
+
+        if event.tabs.id == "stream_tabs":
+            self._stream_selected_step_id = self._step_from_tab_id(event.tab.id, "stream_tab")
+            self._refresh_stream_log()
+        elif event.tabs.id == "result_tabs":
+            self._result_selected_step_id = self._step_from_tab_id(event.tab.id, "result_tab")
+            self._refresh_result_log()
+
+    def _refresh_stream_log(self) -> None:
+        stream_log = self._stream_log()
+        stream_log.clear()
+        for line in self._stream_buffers.get(self._stream_selected_step_id, []):
+            stream_log.write(line)
+
+    def _refresh_result_log(self) -> None:
+        result_log = self._result_log()
+        result_log.clear()
+        for line in self._result_buffers.get(self._result_selected_step_id, []):
+            result_log.write(line)
+
+    def _append_stream_line(self, text: str, step_id: str | None = None) -> None:
+        target_step = step_id or self._current_step_id
+        self._stream_buffers.setdefault(self.GENERAL_STEP_ID, []).append(text)
+        if target_step != self.GENERAL_STEP_ID:
+            self._stream_buffers.setdefault(target_step, []).append(text)
+
+        if self._stream_selected_step_id in {self.GENERAL_STEP_ID, target_step}:
+            self._stream_log().write(text)
+
+    def _append_result_line(self, text: str, step_id: str | None = None) -> None:
+        target_step = step_id or self._current_step_id
+        self._result_buffers.setdefault(self.GENERAL_STEP_ID, []).append(text)
+        if target_step != self.GENERAL_STEP_ID:
+            self._result_buffers.setdefault(target_step, []).append(text)
+
+        if self._result_selected_step_id in {self.GENERAL_STEP_ID, target_step}:
+            self._result_log().write(text)
+
     def set_status(self, text: str, style: str = "white") -> None:
         self._dispatch_ui(self._set_status, text, style)
 
@@ -301,9 +416,9 @@ class CouncilTextualApp(App[None]):
         self._dispatch_ui(self._start_stream, title, style)
 
     def _start_stream(self, title: str, style: str) -> None:
+        del style
         stream_title = f"== {title} =="
-        self._stream_log().write(Text(stream_title, style=f"bold {style}"))
-        self._stream_buffer.append(stream_title)
+        self._append_stream_line(stream_title)
         self.set_status(f"Executando: {title}", style="yellow")
 
     def append_stream(self, text: str) -> None:
@@ -311,16 +426,14 @@ class CouncilTextualApp(App[None]):
 
     def _append_stream(self, text: str) -> None:
         if text:
-            self._stream_log().write(text)
-            self._stream_buffer.append(text)
+            self._append_stream_line(text)
 
     def finish_stream(self) -> None:
         self._dispatch_ui(self._finish_stream)
 
     def _finish_stream(self) -> None:
         separator = "----------------------------------------"
-        self._stream_log().write(Text(separator, style="dim"))
-        self._stream_buffer.append(separator)
+        self._append_stream_line(separator)
 
     def add_result_panel(
         self,
@@ -340,52 +453,27 @@ class CouncilTextualApp(App[None]):
         is_code: bool,
         language: str,
     ) -> None:
-        renderable = (
-            Syntax(content, language, theme="monokai", word_wrap=True) if is_code else content
-        )
-        panel = Panel(
-            renderable,
-            title=Text(title, style=f"bold {style}"),
-            border_style=style,
-            expand=False,
-        )
-        self._result_log().write(panel)
-        self._result_buffer.append(f"=== {title} ===")
-        self._result_buffer.append(content)
-        self._result_buffer.append("")
+        del style, is_code, language
+        self._append_result_line(f"=== {title} ===")
+        self._append_result_line(content)
+        self._append_result_line("")
 
     def show_error(self, message: str) -> None:
         self._dispatch_ui(self._show_error, message)
 
     def _show_error(self, message: str) -> None:
-        self._result_log().write(
-            Panel(
-                message,
-                title=Text("Erro", style="bold red"),
-                border_style="red",
-                expand=False,
-            )
-        )
-        self._result_buffer.append("=== Erro ===")
-        self._result_buffer.append(message)
-        self._result_buffer.append("")
+        self._append_result_line("=== Erro ===")
+        self._append_result_line(message)
+        self._append_result_line("")
         self._set_status(message, style="red")
 
     def show_success(self, message: str) -> None:
         self._dispatch_ui(self._show_success, message)
 
     def _show_success(self, message: str) -> None:
-        self._result_log().write(
-            Panel(
-                message,
-                title=Text("Sucesso", style="bold green"),
-                border_style="green",
-                expand=False,
-            )
-        )
-        self._result_buffer.append("=== Sucesso ===")
-        self._result_buffer.append(message)
-        self._result_buffer.append("")
+        self._append_result_line("=== Sucesso ===")
+        self._append_result_line(message)
+        self._append_result_line("")
         self._set_status(message, style="green")
 
     def clear_logs(self) -> None:
@@ -394,8 +482,13 @@ class CouncilTextualApp(App[None]):
     def _clear_logs(self) -> None:
         self._stream_log().clear()
         self._result_log().clear()
-        self._stream_buffer.clear()
-        self._result_buffer.clear()
+        self._stream_buffers = {self.GENERAL_STEP_ID: []}
+        self._result_buffers = {self.GENERAL_STEP_ID: []}
+        self._step_labels = {self.GENERAL_STEP_ID: "Geral"}
+        self._stream_selected_step_id = self.GENERAL_STEP_ID
+        self._result_selected_step_id = self.GENERAL_STEP_ID
+        self._current_step_id = self.GENERAL_STEP_ID
+        self._reset_tabs()
         self._set_status("Pronto.", style="white")
 
     def _set_running(self, running: bool) -> None:
@@ -459,16 +552,20 @@ class CouncilTextualApp(App[None]):
         self.clear_logs()
 
     def action_copy_stream(self) -> None:
+        selected_step = self._stream_selected_step_id
+        selected_label = self._step_labels.get(selected_step, selected_step)
         self._copy_text_payload(
-            payload="\n".join(self._stream_buffer),
-            label="stream",
+            payload="\n".join(self._stream_buffers.get(selected_step, [])),
+            label=f"stream_{selected_label}",
             empty_message="Stream vazio para copiar.",
         )
 
     def action_copy_results(self) -> None:
+        selected_step = self._result_selected_step_id
+        selected_label = self._step_labels.get(selected_step, selected_step)
         self._copy_text_payload(
-            payload="\n".join(self._result_buffer),
-            label="resultados",
+            payload="\n".join(self._result_buffers.get(selected_step, [])),
+            label=f"resultados_{selected_label}",
             empty_message="Resultados vazios para copiar.",
         )
 
@@ -477,18 +574,24 @@ class CouncilTextualApp(App[None]):
             self.set_status(empty_message, style="yellow")
             return
 
+        safe_label = self._sanitize_filename_segment(label)
         try:
             self.copy_to_clipboard(payload)
-            self.set_status(f"{label.capitalize()} copiados para clipboard.", style="green")
+            self.set_status(f"{label} copiado para clipboard.", style="green")
         except Exception:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = f"/tmp/council_{label}_{timestamp}.txt"
+            path = f"/tmp/council_{safe_label}_{timestamp}.txt"
             with open(path, "w", encoding="utf-8") as file:
                 file.write(payload)
             self.set_status(
                 f"Clipboard indisponível. Conteúdo salvo em {path}",
                 style="yellow",
             )
+
+    def _sanitize_filename_segment(self, value: str) -> str:
+        allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        sanitized = "".join(char if char in allowed_chars else "_" for char in value)
+        return sanitized.strip("_") or "copia"
 
     def _remember_prompt(self, prompt: str) -> None:
         cleaned_prompt = prompt.strip()
