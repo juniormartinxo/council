@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, ResolvedFlowConfig
 from council.paths import COUNCIL_HOME_ENV_VAR
 from council.tui import CouncilTextualApp
 
@@ -105,3 +106,58 @@ def test_copy_text_payload_warns_when_directory_permissions_cannot_be_restricted
 
     assert statuses[-1][1] == "yellow"
     assert "aviso: permissões do diretório não puderam ser restritas" in statuses[-1][0]
+
+
+def test_confirm_implicit_flow_requires_double_confirmation_in_tui(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    statuses: list[tuple[str, str]] = []
+    flow_path = tmp_path / "flow.json"
+
+    monkeypatch.setattr(app, "_set_status", lambda message, style: statuses.append((message, style)))
+    resolved_flow = ResolvedFlowConfig(path=flow_path, source=FLOW_CONFIG_SOURCE_CWD)
+
+    first_attempt = app._confirm_implicit_flow_if_needed(resolved_flow, flow_path=None)
+    second_attempt = app._confirm_implicit_flow_if_needed(resolved_flow, flow_path=None)
+
+    assert first_attempt is False
+    assert second_attempt is True
+    assert statuses[-1][1] == "yellow"
+    assert "Detectada configuração implícita via ./flow.json." in statuses[-1][0]
+    assert app._normalize_path_key(flow_path) in app._trusted_auto_flow_paths
+
+
+def test_confirm_implicit_flow_skips_confirmation_when_flow_is_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    statuses: list[tuple[str, str]] = []
+    flow_path = tmp_path / "flow.json"
+
+    monkeypatch.setattr(app, "_set_status", lambda message, style: statuses.append((message, style)))
+    resolved_flow = ResolvedFlowConfig(path=flow_path, source=FLOW_CONFIG_SOURCE_CWD)
+
+    is_allowed = app._confirm_implicit_flow_if_needed(resolved_flow, flow_path=str(flow_path))
+
+    assert is_allowed is True
+    assert statuses == []
+
+
+def test_confirm_implicit_flow_for_env_source_requires_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    statuses: list[tuple[str, str]] = []
+    flow_path = tmp_path / "flow.json"
+
+    monkeypatch.setattr(app, "_set_status", lambda message, style: statuses.append((message, style)))
+    resolved_flow = ResolvedFlowConfig(path=flow_path, source=FLOW_CONFIG_SOURCE_ENV)
+
+    first_attempt = app._confirm_implicit_flow_if_needed(resolved_flow, flow_path=None)
+    second_attempt = app._confirm_implicit_flow_if_needed(resolved_flow, flow_path=None)
+
+    assert first_attempt is False
+    assert second_attempt is True
+    assert statuses[-1][1] == "yellow"
+    assert "COUNCIL_FLOW_CONFIG" in statuses[-1][0]
