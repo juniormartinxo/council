@@ -26,9 +26,15 @@ pip install -r requirements.txt
 Comandos principais do projeto:
 
 ```bash
-python -m council.main run "Seu prompt"
-python -m council.main run "Seu prompt" --flow-config flow.example.json
-python -m council.main tui
+council run "Seu prompt"
+council run "Seu prompt" --flow-config flow.example.json
+council tui
+```
+
+Para instalar localmente o binário durante o desenvolvimento:
+
+```bash
+pip install -e .
 ```
 
 ## 3. Fluxo de desenvolvimento recomendado
@@ -41,10 +47,10 @@ python -m council.main tui
 ## 4. Convencoes de codigo
 
 - Mantenha a separacao de responsabilidades entre `orchestrator`, `executor`, `state` e `ui/tui`.
-- Preserve compatibilidade de flags e comandos ja documentados.
+- Preserve consistência de flags e comandos documentados.
 - Use type hints ao adicionar novas funcoes.
 - Evite acoplamento entre regra de negocio e detalhes de apresentacao.
-- Evite alterar comportamento default sem atualizar `README.md`, `FLOW_CONFIG.md` ou `OPERATIONS.md`.
+- Evite alterar comportamento default sem atualizar `README.md`, `docs/FLOW_CONFIG.md` ou `docs/OPERATIONS.md`.
 
 ## 5. Validacao minima antes do PR
 
@@ -57,8 +63,8 @@ python -m compileall council
 Se as CLIs externas estiverem disponiveis (`claude`, `gemini`, `codex`), rode tambem:
 
 ```bash
-python -m council.main run "Smoke test local" --flow-config flow.example.json
-python -m council.main tui
+council run "Smoke test local" --flow-config flow.example.json
+council tui
 ```
 
 Se as CLIs externas nao estiverem disponiveis, descreva no PR que a validacao foi apenas estrutural (compilacao + revisao manual).
