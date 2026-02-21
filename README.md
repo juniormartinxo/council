@@ -12,6 +12,8 @@ O **Council** é um orquestrador CLI construído do zero em **Python**, que proj
 
 Este projeto é um laboratório prático de **Engenharia de Software e Arquitetura de Sistemas**, demonstrando forte domínio em gerenciamento de processos do Sistema Operacional, manipulação de streams de dados IO sem bloqueio, e desenvolvimento de interfaces ricas baseadas em terminal (TUI).
 
+O fluxo de agentes é **configurável por arquivo JSON**, permitindo que cada time defina qual IA assume cada papel (planejamento, crítica, implementação, revisão etc.) sem editar o código-fonte.
+
 ## 🧠 Soluções de Engenharia e Arquitetura
 
 O desenvolvimento do Council focou-se na resiliência e na separação de responsabilidades (SoC), abordando os seguintes desafios técnicos complexos:
@@ -46,13 +48,42 @@ A biblioteca `rich` e o `typer` compõem a porta de entrada.
 
 ## 🧬 Dissecando o Loop de Consenso
 
-O Orchestrator executa a seguinte topologia seqüencial em pipeline para processamento da entrada:
+Por padrão, o Orchestrator executa a seguinte topologia seqüencial em pipeline para processamento da entrada:
 
 1. `Claude` **[Arquitetura]**: Planeja os diagramas lógicos a partir do input primitivo.
 2. `Gemini` **[Critique]**: Audita as fragilidades, segurança falha e complexidades excessivas (Big-O).
 3. `Claude` **[Consolidation]**: Refatora as fraquezas sistêmicas do design original.
 4. `Codex` **[Engineer]**: Converte a macro visão consolidada em código-fonte direto ao ponto.
 5. `Gemini` **[Reviewer]**: Inspeciona falhas sintáticas ou de coesão, fechando o loop. 
+
+Se necessário, esse pipeline pode ser sobrescrito via `--flow-config` ou `COUNCIL_FLOW_CONFIG`.
+
+## ⚙️ Configurando Papéis e IAs
+
+O passo a passo completo da feature está em `FLOW_CONFIG.md`.
+
+Resumo rápido:
+
+1. Crie seu fluxo a partir do exemplo:
+
+```bash
+cp flow.example.json flow.meu.json
+```
+
+2. Ajuste o mapeamento de papéis para as IAs no JSON.
+
+3. Execute com configuração customizada:
+
+```bash
+python3 -m council.main run "Seu prompt" --flow-config flow.meu.json
+```
+
+4. Ou defina globalmente por ambiente:
+
+```bash
+export COUNCIL_FLOW_CONFIG=flow.meu.json
+python3 -m council.main run "Seu prompt"
+```
 
 ## ⚙️ Instalação Local
 
@@ -68,6 +99,9 @@ pip install -r requirements.txt
 
 # Dispara a orquestração enviando o STDIN global para os sub-nós
 python -m council.main run "Crie um algoritmo distribuido de map-reduce"
+
+# Dispara com fluxo customizado (escolhendo IAs/papéis livremente)
+python -m council.main run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.example.json
 ```
 
 ---
