@@ -63,7 +63,7 @@ Se necessário, esse pipeline pode ser sobrescrito via `--flow-config` ou `COUNC
 
 ## ⚙️ Configurando Papéis e IAs
 
-O passo a passo completo da feature está em `FLOW_CONFIG.md`.
+O passo a passo completo da feature está em `docs/FLOW_CONFIG.md`.
 
 Resumo rápido:
 
@@ -78,14 +78,14 @@ cp flow.example.json flow.meu.json
 3. Execute com configuração customizada:
 
 ```bash
-python3 -m council.main run "Seu prompt" --flow-config flow.meu.json
+council run "Seu prompt" --flow-config flow.meu.json
 ```
 
 4. Ou defina globalmente por ambiente:
 
 ```bash
 export COUNCIL_FLOW_CONFIG=flow.meu.json
-python3 -m council.main run "Seu prompt"
+council run "Seu prompt"
 ```
 
 ## ⚙️ Instalação Local
@@ -99,19 +99,42 @@ source venv/bin/activate
 
 # Instalação das dependências (Rich, Typer, Textual etc)
 pip install -r requirements.txt
+pip install -e .
 
 # Dispara a orquestração enviando o STDIN global para os sub-nós
-python -m council.main run "Crie um algoritmo distribuido de map-reduce"
+council run "Crie um algoritmo distribuido de map-reduce"
 
 # Dispara com fluxo customizado (escolhendo IAs/papéis livremente)
-python -m council.main run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.example.json
+council run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.example.json
 
 # Abre a TUI interativa (Textual)
-python -m council.main tui
+council tui
 ```
 
 Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
-Detalhes completos de uso da TUI, atalhos, abas por etapa, persistência e cópia estão em `OPERATIONS.md`.
+Detalhes completos de uso da TUI, atalhos, abas por etapa, persistência e cópia estão em `docs/OPERATIONS.md`.
+
+## 📦 Instalação Global (recomendada)
+
+Para usar o Council em qualquer diretório sem levar os arquivos do projeto, instale como aplicativo de linha de comando:
+
+```bash
+pipx install .
+```
+
+Depois disso, use:
+
+```bash
+council run "Seu prompt"
+council tui
+```
+
+Resolução automática de fluxo quando `--flow-config` não for informado:
+
+1. `COUNCIL_FLOW_CONFIG`
+2. `./flow.json` (diretório atual)
+3. `~/.config/council/flow.json` (ou equivalente no seu SO)
+4. fluxo interno default
 
 ---
 *Construído com base em design system limpo de código e arquitetura adaptável.*
