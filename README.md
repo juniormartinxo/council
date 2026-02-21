@@ -14,6 +14,8 @@ Este projeto é um laboratório prático de **Engenharia de Software e Arquitetu
 
 O fluxo de agentes é **configurável por arquivo JSON**, permitindo que cada time defina qual IA assume cada papel (planejamento, crítica, implementação, revisão etc.) sem editar o código-fonte.
 
+Guia para contribuir com o projeto: `CONTRIBUTING.md`.
+
 ## 🧠 Soluções de Engenharia e Arquitetura
 
 O desenvolvimento do Council focou-se na resiliência e na separação de responsabilidades (SoC), abordando os seguintes desafios técnicos complexos:
@@ -109,6 +111,7 @@ python -m council.main tui
 ```
 
 Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
+Detalhes completos de uso da TUI, atalhos, abas por etapa, persistência e cópia estão em `OPERATIONS.md`.
 
 ---
 *Construído com base em design system limpo de código e arquitetura adaptável.*
