@@ -38,6 +38,7 @@ class Orchestrator:
                 input_data = render_step_input(step, template_context)
 
                 result = self._step(
+                    step_key=step.key,
                     agent_name=step.agent_name,
                     role_desc=step.role_desc,
                     command=step.command,
@@ -60,6 +61,7 @@ class Orchestrator:
             
     def _step(
         self,
+        step_key: str,
         agent_name: str,
         role_desc: str,
         command: str,
@@ -67,6 +69,10 @@ class Orchestrator:
         style: str,
         is_code: bool = False,
     ) -> str:
+        set_active_step = getattr(self.ui, "set_active_step", None)
+        if callable(set_active_step):
+            set_active_step(step_key=step_key, label=f"{agent_name} ({role_desc})")
+
         self.ui.console.print(f"\nIniciando passo: {agent_name} ({role_desc})")
         
         with self.ui.live_stream(f"Processando {agent_name}...", style=style) as update_cb:
@@ -119,6 +125,7 @@ class Orchestrator:
 
             follow_up_input = self._build_follow_up_input(step, previous_output=output, feedback=feedback)
             output = self._step(
+                step_key=step.key,
                 agent_name=step.agent_name,
                 role_desc=f"{step.role_desc} (Ajuste)",
                 command=step.command,
