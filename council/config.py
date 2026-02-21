@@ -1,5 +1,8 @@
 import json
 import os
+import re
+import shlex
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -9,6 +12,17 @@ from council.paths import get_user_flow_config_path
 
 FLOW_CONFIG_ENV_VAR = "COUNCIL_FLOW_CONFIG"
 RESERVED_TEMPLATE_KEYS = {"user_prompt", "full_context", "last_output", "instruction"}
+DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\n"), "\\n"),
+    (re.compile(r"\r"), "\\r"),
+    (re.compile(r"&&"), "&&"),
+    (re.compile(r";"), ";"),
+    (re.compile(r"\|"), "|"),
+    (re.compile(r"`"), "`"),
+    (re.compile(r"\$\("), "$("),
+    (re.compile(r">>"), ">>"),
+    (re.compile(r"(?<!>)>(?!>)"), ">"),
+)
 
 
 class ConfigError(Exception):
@@ -192,6 +206,7 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
     agent_name = _get_string(raw_step, ["agent_name", "agent"], required=True, step=position)
     role_desc = _get_string(raw_step, ["role_desc", "role"], required=True, step=position)
     command = _get_string(raw_step, ["command"], required=True, step=position)
+    _validate_command(command, step=position)
     instruction = _get_string(raw_step, ["instruction"], required=True, step=position)
     input_template = (
         _get_string(raw_step, ["input_template"], required=False)
@@ -240,6 +255,33 @@ def _get_string(
         raise ConfigError(f"Campo obrigatório ausente ({expected}){location}.")
 
     return None
+
+
+def _validate_command(command: str, step: int) -> None:
+    disallowed_operators = [
+        label for pattern, label in DISALLOWED_COMMAND_PATTERNS if pattern.search(command)
+    ]
+    if disallowed_operators:
+        operators_as_text = ", ".join(disallowed_operators)
+        raise ConfigError(
+            f"O campo 'command' no passo #{step} contém operadores de shell não permitidos ({operators_as_text})."
+        )
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        raise ConfigError(
+            f"O campo 'command' no passo #{step} possui sintaxe inválida: {exc}."
+        ) from exc
+
+    if not tokens:
+        raise ConfigError(f"O campo 'command' no passo #{step} não pode ser vazio.")
+
+    binary = tokens[0]
+    if shutil.which(binary) is None:
+        raise ConfigError(
+            f"O campo 'command' no passo #{step} usa binário inexistente no PATH: '{binary}'."
+        )
 
 
 def _get_bool(source: dict[str, Any], field_name: str, default: bool) -> bool:
