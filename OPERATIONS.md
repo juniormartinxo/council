@@ -36,6 +36,9 @@ python -m council.main run "Crie um script robusto de backup de sistema"
 python -m council.main run "Prototipe a modelagem de dados para uma rede blockchain simples"
 ```
 
+No modo TUI, o fluxo agora roda com **checkpoint humano por etapa**:
+- após cada agente responder, você escolhe `Continuar`, `Enviar ajuste` (reexecuta o mesmo agente) ou `Abortar`.
+
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
 
@@ -52,7 +55,7 @@ A modificação de novos sub-agentes não requer mexer na interface de usuário 
 Cada passo aceita, entre outros campos:
 - `key`: identificador do resultado para ser reutilizado em passos seguintes.
 - `agent_name` / `role_desc`: rótulos exibidos na UI.
-- `command`: CLI real que será executada (ex: `claude -p`, `gemini -p ""`, `codex exec --skip-git-repo-check`).
+- `command`: CLI real que será executada (ex: `claude -p`, `gemini -p {input}`, `codex exec --skip-git-repo-check`).
 - `instruction`: instrução principal do papel.
 - `input_template`: template com variáveis (`{user_prompt}`, `{full_context}`, `{last_output}` e `{key}` de passos anteriores).
 
@@ -62,7 +65,7 @@ Cada passo aceita, entre outros campos:
   "key": "security_review",
   "agent_name": "Gemini",
   "role_desc": "Auditoria de Segurança",
-  "command": "gemini -p \"\"",
+  "command": "gemini -p {input}",
   "instruction": "Revise o código com foco em segurança.",
   "input_template": "{instruction}\n\nCódigo:\n{code}",
   "style": "dodger_blue1"
