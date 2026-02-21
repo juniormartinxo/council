@@ -65,6 +65,12 @@ Se necessário, esse pipeline pode ser sobrescrito via `--flow-config` ou `COUNC
 
 O passo a passo completo da feature está em `docs/FLOW_CONFIG.md`.
 
+Regras de seguranca aplicadas ao `flow.json` (campo `command`):
+
+- O binario (primeiro token) precisa existir no `PATH`.
+- O parser rejeita `\n`/`\r` e operadores de shell perigosos (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`).
+- Fluxos de origem nao confiavel ainda exigem cautela, pois o executor permanece com `shell=True`.
+
 Resumo rápido:
 
 1. Crie seu fluxo a partir do exemplo:
