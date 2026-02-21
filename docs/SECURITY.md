@@ -126,7 +126,8 @@ Mitigado no fallback de clipboard da TUI.
 
 **Mitigações aplicadas:**
 - Fallback migrou de `/tmp` para `COUNCIL_HOME/clipboard/`.
-- Aplicação explícita de `chmod 0o600` nos arquivos salvos.
+- Criação do arquivo via `tempfile.mkstemp` com endurecimento imediato para `0o600` (via `fchmod` quando disponível), mantendo `chmod 0o600` defensivo após escrita.
+- Endurecimento do diretório de fallback para `0o700`, com aviso explícito na UI quando a restrição de permissões falha.
 - Cleanup automático de arquivos antigos com retenção de 7 dias.
 
 **Risco residual:**
@@ -136,7 +137,7 @@ Mitigado no fallback de clipboard da TUI.
 
 **Evidência:**
 - Código: `council/tui.py`
-- Testes: `tests/test_tui.py`
+- Testes: `tests/test_tui.py` (arquivo `0o600`, diretório `0o700`, cleanup seletivo e fallback com aviso)
 
 ---
 
