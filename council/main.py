@@ -51,6 +51,44 @@ def run(
     orchestrator = Orchestrator(state, executor, ui, flow_steps=flow_steps)
     orchestrator.run_flow(prompt)
 
+@app.command()
+def tui(
+    prompt: Annotated[
+        Optional[str],
+        typer.Option(
+            "--prompt",
+            "-p",
+            help="Prompt inicial opcional para já abrir preenchido na TUI.",
+        ),
+    ] = None,
+    flow_config: Annotated[
+        Optional[str],
+        typer.Option(
+            "--flow-config",
+            "-c",
+            help=(
+                "Caminho de configuração opcional para já abrir preenchido na TUI. "
+                f"Ainda respeita {FLOW_CONFIG_ENV_VAR} se não definido."
+            ),
+        ),
+    ] = None,
+):
+    """
+    Inicia a interface TUI (Textual) do Council.
+    """
+    try:
+        from council.tui import run_tui
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            typer.echo(
+                "Dependência 'textual' não encontrada. "
+                "Instale com: pip install -r requirements.txt"
+            )
+            raise typer.Exit(code=1)
+        raise
+
+    run_tui(initial_prompt=prompt or "", initial_flow_config=flow_config or "")
+
 def cli():
     app()
 
