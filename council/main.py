@@ -832,7 +832,7 @@ def _run_flow_edit_tui(flow_path: Path | None) -> None:
         if exc.name == "textual":
             typer.echo(
                 "Dependência 'textual' não encontrada. "
-                "Instale com: pip install -r requirements.txt"
+                "Instale com: pip install -e ."
             )
             raise typer.Exit(code=1)
         raise
@@ -1220,7 +1220,7 @@ def tui(
         if exc.name == "textual":
             typer.echo(
                 "Dependência 'textual' não encontrada. "
-                "Instale com: pip install -r requirements.txt"
+                "Instale com: pip install -e ."
             )
             raise typer.Exit(code=1)
         raise
