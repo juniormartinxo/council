@@ -281,12 +281,25 @@ Recomendações que não são vulnerabilidades diretas, mas fortalecem a postura
 **Risco residual:**
 - A validação confirma disponibilidade e caminho, mas não comprova integridade/autoria do binário instalado.
 
-### DEF-02 — Logging estruturado para auditoria
+### DEF-02 — Logging estruturado para auditoria (✔️ Mitigado em 2026-02-22)
 
-Erros são renderizados na UI mas não são persistidos em arquivo. Um `council.log` em `COUNCIL_HOME` com níveis (`DEBUG`, `INFO`, `ERROR`) e timestamps permitiria:
-- Diagnóstico post-mortem de falhas em pipelines longos
-- Auditoria de quais comandos foram executados, quando, e com qual resultado
-- Detecção de padrões anômalos (ex: muitas falhas seguidas, comandos inesperados)
+**Status atual (mitigado em 2026-02-22):**
+- Logging estruturado implementado em `COUNCIL_HOME/council.log` (formato JSON por linha).
+- Eventos de auditoria adicionados para:
+  - início/fim de fluxo e passos da orquestração;
+  - execução de comandos no executor (início, sucesso, falha, timeout e aborto);
+  - falhas de pré-validação em CLI/TUI (configuração inválida e pré-requisitos ausentes).
+- O log inclui `timestamp_utc`, `level` (`DEBUG`/`INFO`/`ERROR` etc), `event` e `data`.
+- Nível mínimo configurável por `COUNCIL_LOG_LEVEL`.
+- Permissões endurecidas em disco local: diretório `COUNCIL_HOME` (`0o700`) e arquivo `council.log` (`0o600`) quando suportado pelo host.
+
+**Risco residual:**
+- O log ainda depende da segurança do host local e das políticas de backup.
+- O nível `DEBUG` pode aumentar exposição de metadados operacionais; manter `INFO` em ambientes sensíveis.
+
+**Evidência:**
+- Código: `council/audit_log.py`, `council/executor.py`, `council/orchestrator.py`, `council/main.py`, `council/tui.py`
+- Testes: `tests/test_audit_log.py`
 
 ### DEF-03 — Timeout dinâmico por step (✔️ Mitigado em 2026-02-21)
 
