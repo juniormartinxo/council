@@ -25,6 +25,17 @@ def get_tui_state_file_path() -> Path:
     return get_council_home(create=False) / "tui_state.json"
 
 
+def get_council_db_dir(create: bool = False) -> Path:
+    db_dir = get_council_home(create=create) / "db"
+    if create:
+        db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir
+
+
+def get_run_history_db_path() -> Path:
+    return get_council_db_dir(create=False) / "history.sqlite3"
+
+
 def get_user_flow_config_path() -> Path:
     return get_council_home(create=False) / "flow.json"
 
