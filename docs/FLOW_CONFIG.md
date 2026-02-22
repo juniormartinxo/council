@@ -48,6 +48,48 @@ export COUNCIL_FLOW_CONFIG=flow.meu.json
 council run "Seu prompt"
 ```
 
+## 2.1 Assinatura de Integridade e Autoria (DEF-04)
+
+Para proteger `flow.json` contra adulteração e validar autoria, o Council suporta assinatura Ed25519 com arquivo sidecar `flow.json.sig`.
+
+> Requer dependência opcional de segurança: `pip install -e ".[security]"`.
+
+Fluxo recomendado:
+
+```bash
+# 1) gerar chaves
+council flow keygen --key-id equipe-seguranca-v1 --trust
+
+# 2) assinar o flow
+council flow sign flow.meu.json --private-key equipe-seguranca-v1.key.pem --key-id equipe-seguranca-v1
+
+# 3) verificar manualmente (opcional)
+council flow verify flow.meu.json
+```
+
+Formato do sidecar (`flow.meu.json.sig`):
+
+```json
+{
+  "version": 1,
+  "algorithm": "ed25519",
+  "key_id": "equipe-seguranca-v1",
+  "signature": "<base64>"
+}
+```
+
+O trust store local de chaves públicas fica em:
+- `COUNCIL_HOME/trusted_flow_keys/<key_id>.pem`
+- Opcionalmente, você pode sobrescrever o diretório com `COUNCIL_TRUSTED_FLOW_KEYS_DIR`.
+
+Para bloquear execução de fluxo sem assinatura válida, habilite modo estrito:
+
+```bash
+export COUNCIL_REQUIRE_FLOW_SIGNATURE=1
+```
+
+Valores aceitos: `1`, `0`, `true`, `false`, `yes`, `no`, `on`, `off`.
+
 ## 3. Estrutura do JSON
 
 O arquivo pode ser:
@@ -148,6 +190,7 @@ O carregamento falha com erro claro quando:
 12. O `command` usa caminho explícito no primeiro token (ex.: `/usr/bin/codex`).
 13. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
 14. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
+15. `COUNCIL_REQUIRE_FLOW_SIGNATURE` está ativo e o arquivo não possui assinatura válida/confiada.
 
 ## 6.1 Limites Globais por Ambiente
 
