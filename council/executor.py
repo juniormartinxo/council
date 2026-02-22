@@ -17,6 +17,8 @@ MAX_OUTPUT_CHARS_ENV_VAR = "COUNCIL_MAX_OUTPUT_CHARS"
 OUTPUT_TRUNCATION_NOTICE = (
     "[... saída truncada para o limite configurado; conteúdo completo descartado para preservar memória ...]\n"
 )
+CLI_INPUT_BLOCK_START = "===COUNCIL_INPUT_ARGV_START==="
+CLI_INPUT_BLOCK_END = "===COUNCIL_INPUT_ARGV_END==="
 
 class CommandError(Exception):
     """Exceção levantada quando um subprocesso falha."""
@@ -229,13 +231,14 @@ class Executor:
         Resolve o comando final e define se o payload será enviado por stdin.
         """
         command_tokens = shlex.split(command)
+        argv_payload = self._wrap_argv_input_payload(input_data)
 
         if "{input}" not in command:
             if self._is_gemini_prompt_missing_value(command):
-                return [*command_tokens, input_data or ""], ""
+                return [*command_tokens, argv_payload], ""
             return command_tokens, input_data
 
-        prepared_tokens = [token.replace("{input}", input_data) for token in command_tokens]
+        prepared_tokens = [token.replace("{input}", argv_payload) for token in command_tokens]
         return prepared_tokens, ""
 
     def _is_gemini_prompt_missing_value(self, command: str) -> bool:
@@ -261,6 +264,17 @@ class Executor:
                 return False
 
         return False
+
+    def _wrap_argv_input_payload(self, payload: str) -> str:
+        normalized_payload = payload.strip()
+        if not normalized_payload:
+            return ""
+        return (
+            f"{CLI_INPUT_BLOCK_START}\n"
+            "PROMPT INTEGRAL ENVIADO VIA ARGV.\n"
+            f"{normalized_payload}\n"
+            f"{CLI_INPUT_BLOCK_END}"
+        )
 
     def _terminate_process(self, process: subprocess.Popen) -> None:
         if process.poll() is not None:
