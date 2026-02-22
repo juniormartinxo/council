@@ -162,6 +162,12 @@ export COUNCIL_TUI_STATE_PASSPHRASE_FILE=~/.config/council/passphrase.txt
 council history runs --limit 20
 ```
 
+### Log de auditoria
+
+- O Council registra eventos de execução em `COUNCIL_HOME/council.log` com timestamp, nível e payload estruturado.
+- O arquivo de log usa permissão `0o600` e `COUNCIL_HOME` é endurecido para `0o700` quando suportado pelo host.
+- O nível mínimo de log é configurável por `COUNCIL_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
+
 ## 📦 Instalação Global (recomendada)
 
 Para usar o Council em qualquer diretório sem levar os arquivos do projeto, instale como aplicativo de linha de comando:
