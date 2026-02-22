@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+import pexpect
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -186,34 +187,51 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
 
 
 def _run_probe_command(command: list[str], *, timeout_seconds: int) -> _CommandAttemptResult:
+    # Uses a real PTY; required by CLIs that gate output on isatty() (Unix/Linux only).
+    child: pexpect.spawn | None = None
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+        child = pexpect.spawn(
+            command[0],
+            args=command[1:],
             timeout=timeout_seconds,
+            encoding="utf-8",
         )
-    except FileNotFoundError:
+        child.expect(pexpect.EOF)
+        output = f"{child.before or ''}{child.read() or ''}"
+        child.close()
         return _CommandAttemptResult(
             command=tuple(command),
-            return_code=None,
-            output="",
+            return_code=child.exitstatus,
+            output=_strip_ansi(output),
             timed_out=False,
-            error="binário não encontrado",
+            error=None,
         )
-    except subprocess.TimeoutExpired as exc:
-        output = _coerce_text(exc.stdout) + "\n" + _coerce_text(exc.stderr)
+    except pexpect.TIMEOUT:
+        output = child.before if child is not None else ""
+        if child is not None:
+            try:
+                child.close(force=True)
+            except Exception:
+                pass
         return _CommandAttemptResult(
             command=tuple(command),
             return_code=None,
             output=_strip_ansi(output),
             timed_out=True,
             error="timeout",
+        )
+    except pexpect.exceptions.ExceptionPexpect as exc:
+        if child is not None:
+            try:
+                child.close(force=True)
+            except Exception:
+                pass
+        return _CommandAttemptResult(
+            command=tuple(command),
+            return_code=None,
+            output="",
+            timed_out=False,
+            error=str(exc),
         )
     except OSError as exc:
         return _CommandAttemptResult(
@@ -223,17 +241,6 @@ def _run_probe_command(command: list[str], *, timeout_seconds: int) -> _CommandA
             timed_out=False,
             error=str(exc),
         )
-
-    combined_output = "\n".join(
-        chunk for chunk in [completed.stdout, completed.stderr] if chunk
-    )
-    return _CommandAttemptResult(
-        command=tuple(command),
-        return_code=completed.returncode,
-        output=_strip_ansi(combined_output),
-        timed_out=False,
-        error=None,
-    )
 
 
 def _merge_outputs(attempt: _CommandAttemptResult, output_file_text: str) -> str:
@@ -370,14 +377,6 @@ def _attempt_reason(attempt: _CommandAttemptResult | None) -> str:
 
 def _format_command(command: tuple[str, ...]) -> str:
     return " ".join(command)
-
-
-def _coerce_text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
 
 
 def _extract_model_from_output(raw_output: str) -> str | None:
