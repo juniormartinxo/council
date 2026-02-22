@@ -6,6 +6,7 @@ import pytest
 import council.config as config_module
 from council.config import ConfigError, FlowStep, load_flow_steps, render_step_input
 from council.config import FLOW_CONFIG_ENV_VAR, resolve_flow_config
+from council.flow_signature import FLOW_SIGNATURE_REQUIRED_ENV_VAR
 from council.paths import COUNCIL_HOME_ENV_VAR
 
 
@@ -43,6 +44,7 @@ def _write_json(path: Path, payload: object) -> None:
 def isolated_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(tmp_path / ".council-home"))
     monkeypatch.delenv(FLOW_CONFIG_ENV_VAR, raising=False)
+    monkeypatch.delenv(FLOW_SIGNATURE_REQUIRED_ENV_VAR, raising=False)
     return tmp_path
 
 
@@ -133,6 +135,28 @@ def test_load_flow_steps_raises_on_invalid_json(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="JSON inválido"):
         load_flow_steps(str(bad_file))
+
+
+def test_load_flow_steps_rejects_unsigned_flow_when_signature_is_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload()])
+    monkeypatch.setenv(FLOW_SIGNATURE_REQUIRED_ENV_VAR, "1")
+
+    with pytest.raises(ConfigError, match="Assinatura ausente"):
+        load_flow_steps(str(path))
+
+
+def test_load_flow_steps_fails_on_invalid_signature_requirement_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload()])
+    monkeypatch.setenv(FLOW_SIGNATURE_REQUIRED_ENV_VAR, "talvez")
+
+    with pytest.raises(ConfigError, match=FLOW_SIGNATURE_REQUIRED_ENV_VAR):
+        load_flow_steps(str(path))
 
 
 def test_load_flow_steps_raises_on_duplicate_step_keys(tmp_path: Path) -> None:
