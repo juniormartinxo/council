@@ -290,7 +290,11 @@ def test_doctor_exits_with_error_when_binary_is_missing(monkeypatch: pytest.Monk
 
     assert result.exit_code == 1
     assert "Fonte do fluxo: --flow-config (/tmp/flow.json)" in result.stdout
-    assert "[MISSING] codex: não encontrado no PATH" in result.stdout
+    assert "Diagnóstico de binários" in result.stdout
+    assert "[MISSING]" in result.stdout
+    assert "codex" in result.stdout
+    assert "Não encontrado no PATH" in result.stdout
+    assert "Ausentes: 1" in result.stdout
     assert "Pré-requisitos ausentes no PATH: codex." in result.stdout
 
 
@@ -321,7 +325,11 @@ def test_doctor_reports_success_when_all_prerequisites_are_available(
 
     assert result.exit_code == 0
     assert "Fonte do fluxo: default interno" in result.stdout
-    assert "[OK] claude: /usr/bin/claude" in result.stdout
+    assert "Diagnóstico de binários" in result.stdout
+    assert "[OK]" in result.stdout
+    assert "claude" in result.stdout
+    assert "/usr/bin/claude" in result.stdout
+    assert "Ausentes: 0" in result.stdout
     assert "Pré-requisitos atendidos." in result.stdout
 
 
