@@ -80,6 +80,18 @@ council doctor
 council doctor --flow-config flow.example.json
 ```
 
+Assinatura de `flow.json` (integridade/autoria):
+
+```bash
+# requer pacote opcional: pip install -e ".[security]"
+council flow keygen --key-id equipe-seguranca-v1 --trust
+council flow sign flow.example.json --private-key equipe-seguranca-v1.key.pem --key-id equipe-seguranca-v1
+council flow verify flow.example.json
+
+# modo estrito: bloqueia execução sem assinatura válida
+export COUNCIL_REQUIRE_FLOW_SIGNATURE=1
+```
+
 Criptografia at-rest opcional do histórico de prompts:
 
 ```bash
