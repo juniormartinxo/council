@@ -57,7 +57,7 @@ pip install -e .
 Execute pelo menos:
 
 ```bash
-python -m compileall council
+python3 -m compileall council
 pytest -q
 ```
 
@@ -100,3 +100,4 @@ Ao abrir issue, inclua:
 - Nao inclua dados sensiveis em prompts de exemplo.
 - Em mudancas de subprocesso, valide impacto em cancelamento, timeout e modo headless.
 - Em mudancas no parse de `flow.json`, preserve as validacoes de `command` (binario no `PATH`, bloqueio de operadores perigosos e `\n`/`\r`) e atualize `tests/test_config.py`.
+- Em mudancas de auditoria/logging, preserve fail-fast de `COUNCIL_LOG_LEVEL`/rotação e atualize `README.md`, `docs/OPERATIONS.md`, `docs/SECURITY.md` e `tests/test_audit_log.py`.
