@@ -69,7 +69,7 @@ Regras de seguranca aplicadas ao `flow.json` (campo `command`):
 
 - O binario (primeiro token) precisa existir no `PATH`.
 - O parser rejeita `\n`/`\r` e operadores de shell perigosos (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`).
-- Fluxos de origem nao confiavel ainda exigem cautela, pois o executor permanece com `shell=True`.
+- Fluxos de origem nao confiavel ainda exigem cautela, pois comandos allowlisted continuam executando no host local.
 
 Resumo rápido:
 
@@ -119,6 +119,42 @@ council tui
 
 Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
 Detalhes completos de uso da TUI, atalhos, abas por etapa, persistência e cópia estão em `docs/OPERATIONS.md`.
+
+### Privacidade do histórico da TUI
+
+- O estado da TUI fica em `~/.config/council/tui_state.json` (ou equivalente via `COUNCIL_HOME`).
+- Esse arquivo armazena `last_flow_config` e pode armazenar histórico de prompts (`last_prompt` e `prompt_history`).
+- Para limpar dados sensíveis explicitamente:
+
+```bash
+council history clear
+```
+
+- Para habilitar criptografia at-rest do histórico de prompts, defina uma senha no ambiente:
+
+```bash
+pip install -e ".[security]"
+export COUNCIL_TUI_STATE_PASSPHRASE="sua-senha-forte"
+```
+
+- Quando `COUNCIL_TUI_STATE_PASSPHRASE` estiver definido, prompts não são persistidos em texto plano.
+- Para reduzir exposição da senha em ambientes sensíveis, use arquivo de segredo:
+
+```bash
+printf '%s' 'sua-senha-forte' > ~/.config/council/passphrase.txt
+chmod 600 ~/.config/council/passphrase.txt
+export COUNCIL_TUI_STATE_PASSPHRASE_FILE=~/.config/council/passphrase.txt
+```
+
+### Persistência estruturada de runs
+
+- O Council persiste execuções completas em `COUNCIL_HOME/db/history.sqlite3` (prompt, steps, outputs, duração e timestamps).
+- O arquivo do banco é endurecido com permissão `0o600` e o diretório `COUNCIL_HOME/db` com `0o700` quando suportado pelo host.
+- Para inspecionar rapidamente os últimos runs:
+
+```bash
+council history runs --limit 20
+```
 
 ## 📦 Instalação Global (recomendada)
 
