@@ -63,6 +63,35 @@ class _StubListView:
         self.children: list[object] = []
 
 
+class _StubStepListItem:
+    def __init__(self, step: FlowStep, step_index: int) -> None:
+        self.step = step
+        self.step_index = step_index
+
+    def update_label(self) -> None:  # pragma: no cover - sem efeito no teste
+        pass
+
+
+class _StubReorderListView:
+    def __init__(self, children: list[_StubStepListItem]) -> None:
+        self.children = children
+        self.index: int | None = None
+
+    def move_child(self, child: int, *, before=None, after=None) -> None:
+        moving_item = self.children[child]
+        if before is not None:
+            target_item = self.children[before]
+        elif after is not None:
+            target_item = self.children[after]
+        else:  # pragma: no cover - não usado
+            raise ValueError("before/after obrigatório")
+
+        self.children.remove(moving_item)
+        target_index = self.children.index(target_item)
+        insert_index = target_index if before is not None else target_index + 1
+        self.children.insert(insert_index, moving_item)
+
+
 def test_save_form_to_step_replaces_frozen_flow_step() -> None:
     app = FlowConfigApp(config_path=None)
     original_step = _build_step("template-original")
@@ -130,3 +159,89 @@ def test_load_initial_data_populates_first_step(monkeypatch) -> None:
     assert app.current_step_index == 0
     assert captured["step"] is sample_step
     assert list_view.index == 0
+
+
+def test_move_up_keeps_order_and_selection_consistent() -> None:
+    step_a = _build_step("template-a")
+    step_b = FlowStep(
+        key="critique",
+        agent_name="Gemini",
+        role_desc="Crítica",
+        command="gemini -p {input}",
+        instruction="instruction-b",
+        input_template="template-b",
+    )
+    step_c = FlowStep(
+        key="code",
+        agent_name="Codex",
+        role_desc="Implementação",
+        command="codex exec --skip-git-repo-check",
+        instruction="instruction-c",
+        input_template="template-c",
+    )
+
+    app = FlowConfigApp(config_path=None)
+    app.steps = [step_a, step_b, step_c]
+    app.current_step_index = 1
+    app._save_form_to_step = lambda _idx: None  # type: ignore[assignment]
+    app._populate_form = lambda _step: None  # type: ignore[assignment]
+
+    list_view = _StubReorderListView(
+        [
+            _StubStepListItem(step_a, 0),
+            _StubStepListItem(step_b, 1),
+            _StubStepListItem(step_c, 2),
+        ]
+    )
+    app.query_one = lambda selector, _widget_type=None: list_view if selector == "#step-list" else None  # type: ignore[assignment]
+
+    app._move_up()
+
+    assert [step.key for step in app.steps] == ["critique", "plan", "code"]
+    assert app.current_step_index == 0
+    assert list_view.index == 0
+    assert [item.step.key for item in list_view.children] == ["critique", "plan", "code"]
+    assert [item.step_index for item in list_view.children] == [0, 1, 2]
+
+
+def test_move_down_keeps_order_and_selection_consistent() -> None:
+    step_a = _build_step("template-a")
+    step_b = FlowStep(
+        key="critique",
+        agent_name="Gemini",
+        role_desc="Crítica",
+        command="gemini -p {input}",
+        instruction="instruction-b",
+        input_template="template-b",
+    )
+    step_c = FlowStep(
+        key="code",
+        agent_name="Codex",
+        role_desc="Implementação",
+        command="codex exec --skip-git-repo-check",
+        instruction="instruction-c",
+        input_template="template-c",
+    )
+
+    app = FlowConfigApp(config_path=None)
+    app.steps = [step_a, step_b, step_c]
+    app.current_step_index = 1
+    app._save_form_to_step = lambda _idx: None  # type: ignore[assignment]
+    app._populate_form = lambda _step: None  # type: ignore[assignment]
+
+    list_view = _StubReorderListView(
+        [
+            _StubStepListItem(step_a, 0),
+            _StubStepListItem(step_b, 1),
+            _StubStepListItem(step_c, 2),
+        ]
+    )
+    app.query_one = lambda selector, _widget_type=None: list_view if selector == "#step-list" else None  # type: ignore[assignment]
+
+    app._move_down()
+
+    assert [step.key for step in app.steps] == ["plan", "code", "critique"]
+    assert app.current_step_index == 2
+    assert list_view.index == 2
+    assert [item.step.key for item in list_view.children] == ["plan", "code", "critique"]
+    assert [item.step_index for item in list_view.children] == [0, 1, 2]
