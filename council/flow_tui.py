@@ -249,15 +249,20 @@ class FlowConfigApp(App[None]):
         width: 100%;
         height: auto;
     }
-    
-    .row {
+
+    #form-grid {
         layout: horizontal;
+        width: 100%;
         height: auto;
     }
-    
-    .col {
+
+    #form-left {
         width: 1fr;
-        margin-right: 1;
+        margin-right: 2;
+    }
+
+    #form-right {
+        width: 1fr;
     }
 
     .hidden {
@@ -329,61 +334,65 @@ class FlowConfigApp(App[None]):
                 
                 # Container do formulário em si (oculto inicialmente)
                 with Vertical(id="step-form", classes="hidden"):
-                    with Horizontal(classes="row"):
-                        with Vertical(classes="form-group col"):
-                            yield Label("Perfil do passo (key + role_desc)")
-                            yield Select(
-                                self._profile_options_from_pairs(DEFAULT_STEP_PROFILE_OPTIONS),
-                                id="sel-step-profile",
-                                allow_blank=False,
-                            )
-                        with Vertical(classes="form-group col"):
-                            yield Label("Nome Visível (agent_name)")
-                            yield Select(
-                                self._options_from_values(DEFAULT_AGENT_OPTIONS),
-                                id="sel-agent-name",
-                                allow_blank=False,
-                            )
+                    with Horizontal(id="form-grid"):
+                        with Vertical(id="form-left"):
+                            with Vertical(classes="form-group"):
+                                yield Label("Perfil do passo (key + role_desc)")
+                                yield Select(
+                                    self._profile_options_from_pairs(DEFAULT_STEP_PROFILE_OPTIONS),
+                                    id="sel-step-profile",
+                                    allow_blank=False,
+                                )
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Comando CLI (command)")
+                                yield Input(id="in-command", placeholder="ex: gemini -p {input}")
+                                yield Label("", id="lbl-cmd-warning", classes="warning hidden")
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Instrução Base (instruction)")
+                                yield TextArea(id="ta-instruction", language="markdown")
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Opções")
+                                yield Checkbox("É resultado de código? (is_code)", id="cb-is-code")
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Max Input Chars")
+                                yield Input(id="in-max-input", placeholder="Vazio = Padrão")
+
+                        with Vertical(id="form-right"):
+                            with Vertical(classes="form-group"):
+                                yield Label("Nome Visível (agent_name)")
+                                yield Select(
+                                    self._options_from_values(DEFAULT_AGENT_OPTIONS),
+                                    id="sel-agent-name",
+                                    allow_blank=False,
+                                )
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Estilo visual (style)")
+                                yield Select(
+                                    self._options_from_values(DEFAULT_STYLE_OPTIONS),
+                                    id="sel-style",
+                                    allow_blank=False,
+                                )
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Timeout (segundos)")
+                                yield Input(id="in-timeout", placeholder="120")
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Template de Input (input_template)")
+                                yield TextArea(id="ta-input-template")
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Max Output Chars")
+                                yield Input(id="in-max-output", placeholder="Vazio = Padrão")
                             
-                    with Vertical(classes="form-group"):
-                        yield Label("Estilo visual (style)")
-                        yield Select(
-                            self._options_from_values(DEFAULT_STYLE_OPTIONS),
-                            id="sel-style",
-                            allow_blank=False,
-                        )
-
-                    with Vertical(classes="form-group"):
-                        yield Label("Comando CLI (command)")
-                        yield Input(id="in-command", placeholder="ex: gemini -p {input}")
-                        yield Label("", id="lbl-cmd-warning", classes="warning hidden")
-
-                    with Vertical(classes="form-group"):
-                        yield Label("Instrução Base (instruction)")
-                        yield TextArea(id="ta-instruction", language="markdown")
-
-                    with Vertical(classes="form-group"):
-                        yield Label("Template de Input (input_template)")
-                        yield TextArea(id="ta-input-template")
-
-                    with Horizontal(classes="row"):
-                        with Vertical(classes="form-group col"):
-                            yield Label("Opções")
-                            yield Checkbox("É resultado de código? (is_code)", id="cb-is-code")
-                        with Vertical(classes="form-group col"):
-                            yield Label("Timeout (segundos)")
-                            yield Input(id="in-timeout", placeholder="120")
-                            
-                    with Horizontal(classes="row"):
-                         with Vertical(classes="form-group col"):
-                            yield Label("Max Input Chars")
-                            yield Input(id="in-max-input", placeholder="Vazio = Padrão")
-                         with Vertical(classes="form-group col"):
-                            yield Label("Max Output Chars")
-                            yield Input(id="in-max-output", placeholder="Vazio = Padrão")
-                    with Vertical(classes="form-group"):
-                        yield Label("Max Context Chars (Histórico)")
-                        yield Input(id="in-max-context", placeholder="Vazio = Padrão")
+                            with Vertical(classes="form-group"):
+                                yield Label("Max Context Chars (Histórico)")
+                                yield Input(id="in-max-context", placeholder="Vazio = Padrão")
 
         yield Footer()
 
