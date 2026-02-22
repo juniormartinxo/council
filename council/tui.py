@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import threading
@@ -23,9 +22,18 @@ from council.config import (
     resolve_flow_config,
 )
 from council.executor import CommandError, ExecutionAborted, Executor
+from council.history_store import HistoryStore
 from council.orchestrator import Orchestrator
 from council.paths import get_council_home, get_tui_state_file_path
 from council.state import CouncilState
+from council.tui_state import (
+    TUIStateCryptoError,
+    TUIStateCryptoUnavailableError,
+    load_tui_state_payload,
+    persist_tui_state_payload,
+    read_raw_tui_state_payload,
+    read_tui_state_passphrase,
+)
 
 
 class _ConsoleProxy:
@@ -210,6 +218,7 @@ class CouncilTextualApp(App[None]):
 
     def __init__(self, initial_prompt: str = "", initial_flow_config: str = ""):
         super().__init__()
+        self._state_warning: str | None = None
         persisted_state = self._load_persisted_state()
         saved_flow_config = self._coerce_string(persisted_state.get("last_flow_config"))
 
@@ -290,6 +299,8 @@ class CouncilTextualApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#prompt_input", Input).focus()
+        if self._state_warning:
+            self.set_status(self._state_warning, style="yellow")
 
     def on_unmount(self) -> None:
         self._persist_state()
@@ -820,30 +831,40 @@ class CouncilTextualApp(App[None]):
             "prompt_history": self._prompt_history,
         }
 
-        temp_path: str | None = None
         try:
-            get_council_home(create=True)
-            serialized_payload = json.dumps(state_payload, ensure_ascii=False, indent=2)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                prefix=f".{self.STATE_FILE_PATH.name}.",
-                suffix=".tmp",
-                dir=str(self.STATE_FILE_PATH.parent),
-                delete=False,
-            ) as temp_file:
-                temp_file.write(serialized_payload)
-                temp_path = temp_file.name
-
-            os.chmod(temp_path, 0o600)
-            os.replace(temp_path, self.STATE_FILE_PATH)
-            os.chmod(self.STATE_FILE_PATH, 0o600)
+            passphrase = read_tui_state_passphrase() or None
+            persist_tui_state_payload(
+                path=self.STATE_FILE_PATH,
+                payload=state_payload,
+                passphrase=passphrase,
+            )
+        except TUIStateCryptoUnavailableError:
+            # Fail-closed: não persiste prompts em texto plano quando a criptografia foi solicitada.
+            sanitized_payload = dict(state_payload)
+            sanitized_payload["last_prompt"] = ""
+            sanitized_payload["prompt_history"] = []
+            try:
+                persist_tui_state_payload(
+                    path=self.STATE_FILE_PATH,
+                    payload=sanitized_payload,
+                    passphrase=None,
+                )
+            except OSError:
+                pass
+            self._notify_state_warning(
+                "Criptografia de estado solicitada, mas 'cryptography' não está instalado. "
+                "Prompts sensíveis não foram persistidos."
+            )
+        except TUIStateCryptoError as exc:
+            self._notify_state_warning(f"Falha ao proteger estado da TUI: {exc}")
         except OSError:
-            if temp_path:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
+            pass
+
+    def _notify_state_warning(self, message: str) -> None:
+        self._state_warning = message
+        try:
+            self._set_status(message, style="yellow")
+        except Exception:
             pass
 
     def _safe_input_value(self, input_id: str, fallback: str) -> str:
@@ -857,11 +878,15 @@ class CouncilTextualApp(App[None]):
 
     def _read_state_payload(self, path: Path) -> dict[str, object]:
         try:
-            if not path.exists():
-                return {}
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            return payload if isinstance(payload, dict) else {}
-        except (OSError, json.JSONDecodeError):
+            return load_tui_state_payload(path=path, passphrase=read_tui_state_passphrase() or None)
+        except TUIStateCryptoError as exc:
+            self._state_warning = str(exc)
+            fallback_payload = read_raw_tui_state_payload(path)
+            fallback_payload.pop("last_prompt", None)
+            fallback_payload.pop("prompt_history", None)
+            fallback_payload.pop("encrypted_prompt_state", None)
+            return fallback_payload
+        except OSError:
             return {}
 
     def _normalize_prompt_history(self, value: object) -> list[str]:
@@ -960,7 +985,25 @@ class CouncilTextualApp(App[None]):
             self._dispatch_ui(self._set_running, False)
             return
 
-        orchestrator = Orchestrator(state, executor, ui, flow_steps=flow_steps)
+        history_store: HistoryStore | None = None
+        try:
+            history_store = HistoryStore()
+        except OSError as exc:
+            ui.show_error(f"Aviso: persistência estruturada indisponível: {exc}")
+
+        orchestrator = Orchestrator(
+            state,
+            executor,
+            ui,
+            flow_steps=flow_steps,
+            history_store=history_store,
+            flow_config_path=(
+                str(resolved_flow_config.path)
+                if resolved_flow_config is not None and resolved_flow_config.path is not None
+                else None
+            ),
+            flow_config_source=(resolved_flow_config.source if resolved_flow_config is not None else None),
+        )
 
         try:
             orchestrator.run_flow(prompt)
