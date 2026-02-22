@@ -106,8 +106,7 @@ O ambiente não exige o uso do LangChain. Tudo se resume a ferramentas CLI padro
 python3 -m venv venv
 source venv/bin/activate
 
-# Instalação das dependências (Rich, Typer, Textual etc)
-pip install -r requirements.txt
+# Instalação do pacote e dependências via pyproject
 pip install -e .
 
 # Dispara a orquestração enviando o STDIN global para os sub-nós
@@ -121,6 +120,13 @@ council tui
 
 # Diagnostico explicito dos binarios exigidos pelo fluxo
 council doctor
+```
+
+Opcional com `direnv` (autoativação da venv ao entrar no diretório):
+
+```bash
+direnv allow
+# opcional: cp .envrc.local.example .envrc.local
 ```
 
 Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
