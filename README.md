@@ -69,6 +69,8 @@ Visão de execução ponta-a-ponta com diagrama Mermaid: `docs/APPLICATION_FLOW.
 Regras de seguranca aplicadas ao `flow.json` (campo `command`):
 
 - O binario (primeiro token) precisa existir no `PATH`.
+- O binario precisa estar na allowlist: `claude`, `gemini`, `codex`, `ollama`.
+- O primeiro token deve ser apenas nome de binario (caminho explicito como `/usr/bin/codex` e bloqueado).
 - O parser rejeita `\n`/`\r` e operadores de shell perigosos (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`).
 - Fluxos de origem nao confiavel ainda exigem cautela, pois comandos allowlisted continuam executando no host local.
 
@@ -116,6 +118,9 @@ council run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.exa
 
 # Abre a TUI interativa (Textual)
 council tui
+
+# Diagnostico explicito dos binarios exigidos pelo fluxo
+council doctor
 ```
 
 Na TUI, cada etapa possui checkpoint humano: você pode continuar, enviar ajuste para o mesmo agente (reexecução) ou abortar o fluxo.
@@ -170,7 +175,10 @@ Depois disso, use:
 ```bash
 council run "Seu prompt"
 council tui
+council doctor
 ```
+
+`council run` e TUI fazem preflight automatico dos binarios do fluxo antes da orquestracao.
 
 Resolução automática de fluxo quando `--flow-config` não for informado:
 
