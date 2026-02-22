@@ -64,6 +64,7 @@ Se necessário, esse pipeline pode ser sobrescrito via `--flow-config` ou `COUNC
 ## ⚙️ Configurando Papéis e IAs
 
 O passo a passo completo da feature está em `docs/FLOW_CONFIG.md`.
+Visão de execução ponta-a-ponta com diagrama Mermaid: `docs/APPLICATION_FLOW.md`.
 
 Regras de seguranca aplicadas ao `flow.json` (campo `command`):
 
