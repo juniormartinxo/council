@@ -18,6 +18,7 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
+    Select,
     Static,
     TextArea,
 )
@@ -31,6 +32,40 @@ from council.config import (
 from council.flow_signature import get_signature_file_path
 
 DEFAULT_INPUT_TEMPLATE = "{instruction}\n\n{full_context}"
+DEFAULT_STEP_PROFILE_OPTIONS = (
+    ("plan", "Planejamento"),
+    ("critique", "Crítica"),
+    ("final_plan", "Consolidação"),
+    ("implement", "Implementação"),
+    ("code", "Implementação"),
+    ("review", "Revisão"),
+    ("final_review", "Revisão Final"),
+)
+DEFAULT_STYLE_OPTIONS = (
+    "blue",
+    "dark_goldenrod",
+    "dodger_blue1",
+    "bright_black",
+    "green",
+    "yellow",
+    "magenta",
+    "cyan",
+    "red",
+    "white",
+)
+STEP_PROFILE_SEPARATOR = "||"
+DEFAULT_AGENT_OPTIONS = (
+    "Claude",
+    "Gemini",
+    "Codex",
+    "Ollama",
+)
+DEFAULT_COMMAND_BY_AGENT = {
+    "claude": "claude -p",
+    "gemini": "gemini -p {input}",
+    "codex": "codex exec --skip-git-repo-check",
+    "ollama": "ollama run llama3.1",
+}
 
 
 class StepListItem(ListItem):
@@ -126,7 +161,7 @@ class FlowConfigApp(App[None]):
     }
 
     #sidebar {
-        width: 30;
+        width: 34;
         height: 100%;
         border-right: solid $primary;
         background: $boost;
@@ -149,9 +184,23 @@ class FlowConfigApp(App[None]):
         layout: vertical;
     }
 
-    #sidebar-actions Button {
+    #sidebar-actions > Button {
         width: 100%;
         margin-bottom: 1;
+    }
+
+    #order-actions {
+        layout: horizontal;
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #order-actions Button {
+        width: 1fr;
+    }
+
+    #btn-up {
+        margin-right: 1;
     }
 
     #form-container {
@@ -175,6 +224,10 @@ class FlowConfigApp(App[None]):
         width: 100%;
     }
 
+    .form-group > Select {
+        width: 100%;
+    }
+
     .form-group > TextArea {
         height: 6;
         width: 100%;
@@ -191,6 +244,11 @@ class FlowConfigApp(App[None]):
         content-align: center middle;
         color: $text-muted;
     }
+
+    #step-form {
+        width: 100%;
+        height: auto;
+    }
     
     .row {
         layout: horizontal;
@@ -200,6 +258,10 @@ class FlowConfigApp(App[None]):
     .col {
         width: 1fr;
         margin-right: 1;
+    }
+
+    .hidden {
+        display: none;
     }
     """
 
@@ -215,6 +277,7 @@ class FlowConfigApp(App[None]):
         self.steps: list[FlowStep] = []
         self.current_step_index: int | None = None
         self.is_new_file = False
+        self._is_populating_form = False
 
     def on_mount(self) -> None:
         self.title = "Council Flow Editor"
@@ -241,6 +304,8 @@ class FlowConfigApp(App[None]):
         list_view = self.query_one("#step-list", ListView)
         if self.steps and len(list_view.children) > 0:
             list_view.index = 0
+            self.current_step_index = 0
+            self._populate_form(self.steps[0])
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -253,9 +318,9 @@ class FlowConfigApp(App[None]):
                 with Vertical(id="sidebar-actions"):
                     yield Button("Novo Passo (Ctrl+N)", id="btn-new", variant="success")
                     # Controles de ordem aparecem apenas quando há seleção
-                    with Horizontal():
-                        yield Button("▲", id="btn-up", variant="primary", classes="col")
-                        yield Button("▼", id="btn-down", variant="primary", classes="col")
+                    with Horizontal(id="order-actions"):
+                        yield Button("Subir Passo", id="btn-up", variant="primary")
+                        yield Button("Descer Passo", id="btn-down", variant="primary")
                     yield Button("Remover", id="btn-delete", variant="error")
 
             # Área principal do formulário
@@ -266,19 +331,27 @@ class FlowConfigApp(App[None]):
                 with Vertical(id="step-form", classes="hidden"):
                     with Horizontal(classes="row"):
                         with Vertical(classes="form-group col"):
-                            yield Label("Chave (key)")
-                            yield Input(id="in-key", placeholder="ex: plan")
+                            yield Label("Perfil do passo (key + role_desc)")
+                            yield Select(
+                                self._profile_options_from_pairs(DEFAULT_STEP_PROFILE_OPTIONS),
+                                id="sel-step-profile",
+                                allow_blank=False,
+                            )
                         with Vertical(classes="form-group col"):
                             yield Label("Nome Visível (agent_name)")
-                            yield Input(id="in-agent-name", placeholder="ex: Claude")
+                            yield Select(
+                                self._options_from_values(DEFAULT_AGENT_OPTIONS),
+                                id="sel-agent-name",
+                                allow_blank=False,
+                            )
                             
-                    with Horizontal(classes="row"):
-                        with Vertical(classes="form-group col"):
-                            yield Label("Papel (role_desc)")
-                            yield Input(id="in-role-desc", placeholder="ex: Planejamento")
-                        with Vertical(classes="form-group col"):
-                            yield Label("Estilo visual (style)")
-                            yield Input(id="in-style", placeholder="ex: blue, bold green")
+                    with Vertical(classes="form-group"):
+                        yield Label("Estilo visual (style)")
+                        yield Select(
+                            self._options_from_values(DEFAULT_STYLE_OPTIONS),
+                            id="sel-style",
+                            allow_blank=False,
+                        )
 
                     with Vertical(classes="form-group"):
                         yield Label("Comando CLI (command)")
@@ -327,6 +400,78 @@ class FlowConfigApp(App[None]):
             new_index = min(current_index, len(self.steps) - 1)
             list_view.index = new_index
 
+    @staticmethod
+    def _options_from_values(values: tuple[str, ...] | list[str]) -> list[tuple[str, str]]:
+        return [(value, value) for value in values]
+
+    @staticmethod
+    def _encode_step_profile_value(key: str, role_desc: str) -> str:
+        return f"{key}{STEP_PROFILE_SEPARATOR}{role_desc}"
+
+    @staticmethod
+    def _decode_step_profile_value(profile_value: str) -> tuple[str, str] | None:
+        if STEP_PROFILE_SEPARATOR not in profile_value:
+            return None
+        key, role_desc = profile_value.split(STEP_PROFILE_SEPARATOR, 1)
+        cleaned_key = key.strip()
+        cleaned_role = role_desc.strip()
+        if not cleaned_key or not cleaned_role:
+            return None
+        return cleaned_key, cleaned_role
+
+    @classmethod
+    def _profile_options_from_pairs(
+        cls,
+        pairs: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        options: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for key, role_desc in pairs:
+            encoded_value = cls._encode_step_profile_value(key, role_desc)
+            if encoded_value in seen:
+                continue
+            seen.add(encoded_value)
+            label = f"{key} ({role_desc})"
+            options.append((label, encoded_value))
+        return options
+
+    @staticmethod
+    def _merge_options(base_values: tuple[str, ...], dynamic_values: list[str], current: str) -> list[str]:
+        merged = list(base_values)
+        for value in dynamic_values:
+            if value and value not in merged:
+                merged.append(value)
+        if current and current not in merged:
+            merged.append(current)
+        return merged
+
+    @staticmethod
+    def _merge_profile_pairs(
+        base_pairs: tuple[tuple[str, str], ...],
+        dynamic_pairs: list[tuple[str, str]],
+        current_pair: tuple[str, str],
+    ) -> list[tuple[str, str]]:
+        merged = list(base_pairs)
+        for pair in dynamic_pairs:
+            if pair not in merged and pair[0] and pair[1]:
+                merged.append(pair)
+        if current_pair not in merged and current_pair[0] and current_pair[1]:
+            merged.append(current_pair)
+        return merged
+
+    def _read_select_value(self, selector: str, fallback: str) -> str:
+        select = self.query_one(selector, Select)
+        value = select.value
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+        return fallback
+
+    @staticmethod
+    def _resolve_default_command_for_agent(agent_name: str) -> str | None:
+        return DEFAULT_COMMAND_BY_AGENT.get(agent_name.strip().lower())
+
     @on(ListView.Selected, "#step-list")
     def _on_step_selected(self, event: ListView.Selected) -> None:
         item = cast(StepListItem, event.item)
@@ -348,27 +493,62 @@ class FlowConfigApp(App[None]):
         self.query_one("#empty-state").add_class("hidden")
         form = self.query_one("#step-form")
         form.remove_class("hidden")
+        self._is_populating_form = True
 
-        self.query_one("#in-key", Input).value = step.key
-        self.query_one("#in-agent-name", Input).value = step.agent_name
-        self.query_one("#in-role-desc", Input).value = step.role_desc
-        self.query_one("#in-style", Input).value = step.style
-        
+        try:
+            profile_options = self._merge_profile_pairs(
+                DEFAULT_STEP_PROFILE_OPTIONS,
+                [(existing_step.key, existing_step.role_desc) for existing_step in self.steps],
+                (step.key, step.role_desc),
+            )
+            profile_select = self.query_one("#sel-step-profile", Select)
+            profile_select.set_options(self._profile_options_from_pairs(profile_options))
+            profile_select.value = self._encode_step_profile_value(step.key, step.role_desc)
+
+            agent_options = self._merge_options(
+                DEFAULT_AGENT_OPTIONS,
+                [existing_step.agent_name for existing_step in self.steps],
+                step.agent_name,
+            )
+            agent_select = self.query_one("#sel-agent-name", Select)
+            agent_select.set_options(self._options_from_values(agent_options))
+            agent_select.value = step.agent_name
+
+            style_options = self._merge_options(DEFAULT_STYLE_OPTIONS, [], step.style)
+            style_select = self.query_one("#sel-style", Select)
+            style_select.set_options(self._options_from_values(style_options))
+            style_select.value = step.style
+            
+            cmd_input = self.query_one("#in-command", Input)
+            cmd_input.value = step.command
+            self._validate_command_live(step.command)
+
+            txt_instruction = self.query_one("#ta-instruction", TextArea)
+            txt_instruction.text = step.instruction
+
+            txt_template = self.query_one("#ta-input-template", TextArea)
+            txt_template.text = step.input_template
+
+            self.query_one("#cb-is-code", Checkbox).value = step.is_code
+            self.query_one("#in-timeout", Input).value = str(step.timeout)
+            self.query_one("#in-max-input", Input).value = str(step.max_input_chars) if step.max_input_chars else ""
+            self.query_one("#in-max-output", Input).value = str(step.max_output_chars) if step.max_output_chars else ""
+            self.query_one("#in-max-context", Input).value = str(step.max_context_chars) if step.max_context_chars else ""
+        finally:
+            self._is_populating_form = False
+
+    @on(Select.Changed, "#sel-agent-name")
+    def _on_agent_changed(self, event: Select.Changed) -> None:
+        if self._is_populating_form:
+            return
+        if not isinstance(event.value, str):
+            return
+        command = self._resolve_default_command_for_agent(event.value)
+        if command is None:
+            return
         cmd_input = self.query_one("#in-command", Input)
-        cmd_input.value = step.command
-        self._validate_command_live(step.command)
-
-        txt_instruction = self.query_one("#ta-instruction", TextArea)
-        txt_instruction.text = step.instruction
-
-        txt_template = self.query_one("#ta-input-template", TextArea)
-        txt_template.text = step.input_template
-
-        self.query_one("#cb-is-code", Checkbox).value = step.is_code
-        self.query_one("#in-timeout", Input).value = str(step.timeout)
-        self.query_one("#in-max-input", Input).value = str(step.max_input_chars) if step.max_input_chars else ""
-        self.query_one("#in-max-output", Input).value = str(step.max_output_chars) if step.max_output_chars else ""
-        self.query_one("#in-max-context", Input).value = str(step.max_context_chars) if step.max_context_chars else ""
+        cmd_input.value = command
+        self._validate_command_live(command)
 
     @on(Input.Changed, "#in-command")
     def _on_command_changed(self, event: Input.Changed) -> None:
@@ -405,10 +585,16 @@ class FlowConfigApp(App[None]):
         if index < 0 or index >= len(self.steps):
             return
 
-        key = self.query_one("#in-key", Input).value.strip() or f"step_{index + 1}"
-        agent_name = self.query_one("#in-agent-name", Input).value.strip() or "Agent"
-        role_desc = self.query_one("#in-role-desc", Input).value.strip() or "Role"
-        style = self.query_one("#in-style", Input).value.strip() or "blue"
+        default_profile_value = self._encode_step_profile_value(f"step_{index + 1}", "Role")
+        profile_value = self._read_select_value("#sel-step-profile", default_profile_value)
+        decoded_profile = self._decode_step_profile_value(profile_value)
+        if decoded_profile is None:
+            key = f"step_{index + 1}"
+            role_desc = "Role"
+        else:
+            key, role_desc = decoded_profile
+        agent_name = self._read_select_value("#sel-agent-name", "Agent")
+        style = self._read_select_value("#sel-style", "blue")
         command = self.query_one("#in-command", Input).value.strip() or "echo 'no command'"
         instruction = self.query_one("#ta-instruction", TextArea).text.strip()
         input_template = (
