@@ -668,7 +668,7 @@ def _run_simple_flow_editor_session(
         console.print("")
         console.print(_build_simple_flow_steps_table(steps))
         raw_action = Prompt.ask(
-            Text("Ação :> [editar(e)|adicionar(a)|remover(r)|mover(m)|salvar(s)|sair(q)]"),
+            Text("Ação :: [editar(e) | adicionar(a) | remover(r) | mover(m) | salvar(s) | sair(q)]"),
             default="salvar",
             console=console,
         )
