@@ -16,11 +16,16 @@ from council.config import (
     load_flow_steps,
     resolve_flow_config,
 )
+from council.history_store import HistoryStore
+from council.paths import get_tui_state_file_path
+from council.tui_state import TUIStateCryptoError, clear_tui_prompt_history, read_tui_state_passphrase
 
 app = typer.Typer(
     help="Council - Multi-Agent System (MAS) Orquestrador via CLI",
     add_completion=False,
 )
+history_app = typer.Typer(help="Gerencia histórico local da TUI.")
+app.add_typer(history_app, name="history")
 
 @app.callback()
 def main():
@@ -110,8 +115,22 @@ def run(
         ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
+    history_store: HistoryStore | None = None
+    try:
+        history_store = HistoryStore()
+    except OSError as exc:
+        ui.show_error(f"Aviso: persistência estruturada indisponível: {exc}")
+
     # Inicia a orquestração
-    orchestrator = Orchestrator(state, executor, ui, flow_steps=flow_steps)
+    orchestrator = Orchestrator(
+        state,
+        executor,
+        ui,
+        flow_steps=flow_steps,
+        history_store=history_store,
+        flow_config_path=str(resolved_config.path) if resolved_config.path is not None else None,
+        flow_config_source=resolved_config.source,
+    )
     orchestrator.run_flow(prompt)
 
 @app.command()
@@ -152,6 +171,73 @@ def tui(
         raise
 
     run_tui(initial_prompt=prompt or "", initial_flow_config=flow_config or "")
+
+
+@history_app.command("clear")
+def history_clear() -> None:
+    """
+    Limpa o histórico de prompts persistido pela TUI.
+    """
+    state_path = get_tui_state_file_path()
+    try:
+        passphrase = read_tui_state_passphrase() or None
+    except TUIStateCryptoError as exc:
+        typer.echo(f"Falha ao resolver passphrase para limpeza: {exc}")
+        raise typer.Exit(code=1)
+
+    try:
+        cleared = clear_tui_prompt_history(state_path, passphrase=passphrase)
+    except (OSError, TUIStateCryptoError) as exc:
+        typer.echo(f"Falha ao limpar histórico em '{state_path}': {exc}")
+        raise typer.Exit(code=1)
+
+    if not cleared:
+        typer.echo(f"Nenhum histórico encontrado em '{state_path}'.")
+        return
+
+    typer.echo(f"Histórico de prompts removido de '{state_path}'.")
+
+
+@history_app.command("runs")
+def history_runs(
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Quantidade máxima de runs retornados."),
+    ] = 20,
+) -> None:
+    """
+    Lista runs persistidos no banco local.
+    """
+    if limit <= 0:
+        typer.echo("Valor inválido para --limit: informe um inteiro positivo.")
+        raise typer.Exit(code=1)
+
+    try:
+        history_store = HistoryStore()
+    except OSError as exc:
+        typer.echo(f"Falha ao abrir histórico de runs: {exc}")
+        raise typer.Exit(code=1)
+
+    runs = history_store.list_runs(limit=limit)
+    if not runs:
+        typer.echo("Nenhum run persistido em COUNCIL_HOME/db/history.sqlite3.")
+        return
+
+    for run in runs:
+        run_id = run.get("id")
+        status = run.get("status")
+        started_at = run.get("started_at_utc")
+        duration_ms = run.get("duration_ms")
+        executed_steps = run.get("executed_steps")
+        successful_steps = run.get("successful_steps")
+        source = run.get("flow_config_source") or "default"
+        typer.echo(
+            (
+                f"run={run_id} status={status} started_at={started_at} "
+                f"duration_ms={duration_ms} steps={successful_steps}/{executed_steps} "
+                f"flow_source={source}"
+            )
+        )
 
 def cli():
     app()
