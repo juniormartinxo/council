@@ -9,6 +9,7 @@ from typing import Literal, Optional
 from typing_extensions import Annotated
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -73,6 +74,14 @@ app.add_typer(flow_app, name="flow")
 _SUPPORTED_PROVIDER_LIMIT_BINARIES = {"codex", "claude", "gemini"}
 _PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS = 8
 _DEFAULT_INPUT_TEMPLATE = "{instruction}\n\n{full_context}"
+_ROLE_DESC_SUGGESTIONS: tuple[tuple[str, str], ...] = (
+    ("Planejamento", "Define estratégia e arquitetura."),
+    ("Crítica", "Questiona riscos e inconsistências."),
+    ("Consolidação", "Unifica propostas e resolve conflitos."),
+    ("Implementação", "Produz código seguindo o plano."),
+    ("Revisão", "Revisa qualidade e regressões."),
+    ("Segurança", "Foca em hardening e ameaças."),
+)
 
 
 @app.callback()
@@ -413,48 +422,56 @@ def _load_flow_steps_for_editor(flow_path: Path | None) -> list[FlowStep]:
         return get_default_flow_steps()
 
 
-def _summarize_flow_steps(steps: list[FlowStep]) -> None:
-    typer.echo("")
-    typer.echo("Passos atuais:")
+def _build_simple_flow_steps_table(steps: list[FlowStep]) -> Table:
+    table = Table(title="Passos atuais", expand=False, header_style="bold")
+    table.add_column("#", no_wrap=True, style="cyan")
+    table.add_column("Key", no_wrap=True)
+    table.add_column("Agente", no_wrap=True)
+    table.add_column("Papel", no_wrap=True)
+    table.add_column("Comando")
     if not steps:
-        typer.echo("  (nenhum passo)")
-        return
+        table.add_row("-", "(nenhum passo)", "-", "-", "-")
+        return table
     for index, step in enumerate(steps, start=1):
         command_preview = step.command.replace("\n", " ").strip() or "(vazio)"
-        if len(command_preview) > 60:
-            command_preview = f"{command_preview[:57]}..."
-        typer.echo(
-            f"  {index}. key={step.key} | agent={step.agent_name} | command={command_preview}"
+        if len(command_preview) > 70:
+            command_preview = f"{command_preview[:67]}..."
+        table.add_row(
+            str(index),
+            step.key,
+            step.agent_name,
+            step.role_desc,
+            command_preview,
         )
+    return table
 
 
-def _prompt_positive_int(label: str, default: int) -> int:
+def _prompt_positive_int(label: str, default: int, console: Console) -> int:
     while True:
-        raw_value = typer.prompt(label, default=str(default)).strip()
-        try:
-            parsed_value = int(raw_value)
-        except ValueError:
-            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo.")
-            continue
+        parsed_value = IntPrompt.ask(label, default=default, console=console)
         if parsed_value <= 0:
-            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo.")
+            console.print(f"[yellow]Valor inválido para '{label}'. Informe inteiro positivo.[/yellow]")
             continue
         return parsed_value
 
 
-def _prompt_optional_positive_int(label: str, default: int | None) -> int | None:
+def _prompt_optional_positive_int(label: str, default: int | None, console: Console) -> int | None:
     while True:
         default_text = str(default) if default is not None else ""
-        raw_value = typer.prompt(label, default=default_text).strip()
+        raw_value = Prompt.ask(label, default=default_text, console=console).strip()
         if not raw_value:
             return None
         try:
             parsed_value = int(raw_value)
         except ValueError:
-            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo ou vazio.")
+            console.print(
+                f"[yellow]Valor inválido para '{label}'. Informe inteiro positivo ou vazio.[/yellow]"
+            )
             continue
         if parsed_value <= 0:
-            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo ou vazio.")
+            console.print(
+                f"[yellow]Valor inválido para '{label}'. Informe inteiro positivo ou vazio.[/yellow]"
+            )
             continue
         return parsed_value
 
@@ -462,12 +479,13 @@ def _prompt_optional_positive_int(label: str, default: int | None) -> int | None
 def _prompt_text_field(
     label: str,
     default: str,
+    console: Console,
     *,
     fallback: str | None = None,
     decode_newlines: bool = False,
 ) -> str:
     prompt_default = default.replace("\n", "\\n") if decode_newlines else default
-    raw_value = typer.prompt(label, default=prompt_default).strip()
+    raw_value = Prompt.ask(label, default=prompt_default, console=console).strip()
     value = raw_value.replace("\\n", "\n") if decode_newlines else raw_value
     if value:
         return value
@@ -476,55 +494,112 @@ def _prompt_text_field(
     return default
 
 
-def _prompt_step_index(total_steps: int, label: str, *, default_value: int = 1) -> int | None:
+def _prompt_step_index(
+    total_steps: int,
+    label: str,
+    console: Console,
+    *,
+    default_value: int = 1,
+) -> int | None:
     if total_steps <= 0:
-        typer.echo("Não há passos disponíveis para essa ação.")
+        console.print("[yellow]Não há passos disponíveis para essa ação.[/yellow]")
         return None
-    raw_value = typer.prompt(label, default=str(default_value)).strip()
-    try:
-        parsed_value = int(raw_value)
-    except ValueError:
-        typer.echo("Índice inválido. Informe um número inteiro.")
-        return None
+    parsed_value = IntPrompt.ask(label, default=default_value, console=console)
     if parsed_value < 1 or parsed_value > total_steps:
-        typer.echo(f"Índice fora do intervalo. Use valores entre 1 e {total_steps}.")
+        console.print(
+            f"[yellow]Índice fora do intervalo. Use valores entre 1 e {total_steps}.[/yellow]"
+        )
         return None
     return parsed_value - 1
 
 
-def _prompt_step_form(step: FlowStep, index: int) -> FlowStep:
-    typer.echo("")
-    typer.echo(f"Editando passo #{index + 1} (use Enter para manter padrão).")
-    key = _prompt_text_field("key", step.key, fallback=f"step_{index + 1}")
-    agent_name = _prompt_text_field("agent_name", step.agent_name, fallback="Agent")
-    role_desc = _prompt_text_field("role_desc", step.role_desc, fallback="Role")
-    command = _prompt_text_field("command", step.command, fallback="echo 'no command'")
+def _resolve_role_desc_choice(raw_value: str, current_value: str) -> str:
+    cleaned_value = raw_value.strip()
+    if not cleaned_value:
+        return current_value or "Role"
+    if cleaned_value.isdigit():
+        index = int(cleaned_value)
+        if index < 1 or index > len(_ROLE_DESC_SUGGESTIONS):
+            raise ValueError("Opção de role_desc fora do intervalo.")
+        return _ROLE_DESC_SUGGESTIONS[index - 1][0]
+    return cleaned_value
+
+
+def _render_role_desc_suggestions(console: Console) -> None:
+    options_table = Table(
+        title="Sugestões de role_desc",
+        expand=False,
+        header_style="bold",
+        box=None,
+    )
+    options_table.add_column("#", no_wrap=True, style="cyan")
+    options_table.add_column("Role")
+    options_table.add_column("Uso")
+    for index, (role_name, role_usage) in enumerate(_ROLE_DESC_SUGGESTIONS, start=1):
+        options_table.add_row(str(index), role_name, role_usage)
+    console.print(options_table)
+
+
+def _prompt_role_desc(current_value: str, console: Console) -> str:
+    _render_role_desc_suggestions(console)
+    while True:
+        raw_value = Prompt.ask(
+            "role_desc (número da lista ou texto livre)",
+            default=current_value,
+            console=console,
+        )
+        try:
+            return _resolve_role_desc_choice(raw_value, current_value)
+        except ValueError:
+            console.print(
+                f"[yellow]Opção inválida. Use 1..{len(_ROLE_DESC_SUGGESTIONS)} "
+                "ou informe texto livre.[/yellow]"
+            )
+
+
+def _prompt_step_form(step: FlowStep, index: int, console: Console) -> FlowStep:
+    console.print("")
+    console.print(
+        Panel.fit(
+            f"Editando passo #{index + 1}. Use Enter para manter valor atual.",
+            border_style="cyan",
+        )
+    )
+    key = _prompt_text_field("key", step.key, console, fallback=f"step_{index + 1}")
+    agent_name = _prompt_text_field("agent_name", step.agent_name, console, fallback="Agent")
+    role_desc = _prompt_role_desc(step.role_desc, console)
+    command = _prompt_text_field("command", step.command, console, fallback="echo 'no command'")
     instruction = _prompt_text_field(
         "instruction (use \\n para nova linha)",
         step.instruction,
+        console,
         fallback="instruction",
         decode_newlines=True,
     )
     input_template = _prompt_text_field(
         "input_template (use \\n para nova linha)",
         step.input_template,
+        console,
         fallback=_DEFAULT_INPUT_TEMPLATE,
         decode_newlines=True,
     )
-    style = _prompt_text_field("style", step.style, fallback="blue")
-    is_code = typer.confirm("is_code?", default=step.is_code)
-    timeout = _prompt_positive_int("timeout (segundos)", step.timeout)
+    style = _prompt_text_field("style", step.style, console, fallback="blue")
+    is_code = Confirm.ask("is_code?", default=step.is_code, console=console)
+    timeout = _prompt_positive_int("timeout (segundos)", step.timeout, console)
     max_input_chars = _prompt_optional_positive_int(
         "max_input_chars (vazio = padrão)",
         step.max_input_chars,
+        console,
     )
     max_output_chars = _prompt_optional_positive_int(
         "max_output_chars (vazio = padrão)",
         step.max_output_chars,
+        console,
     )
     max_context_chars = _prompt_optional_positive_int(
         "max_context_chars (vazio = padrão)",
         step.max_context_chars,
+        console,
     )
 
     return FlowStep(
@@ -554,53 +629,69 @@ def _new_default_step(position: int) -> FlowStep:
     )
 
 
-def _run_simple_flow_editor_session(initial_steps: list[FlowStep]) -> tuple[list[FlowStep], bool]:
+def _run_simple_flow_editor_session(
+    initial_steps: list[FlowStep],
+    console: Console,
+) -> tuple[list[FlowStep], bool]:
     steps = list(initial_steps)
     while True:
-        _summarize_flow_steps(steps)
-        action = typer.prompt(
-            "Ação [e=editar, a=adicionar, r=remover, m=mover, s=salvar, q=sair]",
+        console.print("")
+        console.print(_build_simple_flow_steps_table(steps))
+        action = Prompt.ask(
+            "Ação",
+            choices=["e", "a", "r", "m", "s", "q"],
             default="s",
+            console=console,
         ).strip().lower()
 
         if action == "e":
-            index = _prompt_step_index(len(steps), "Número do passo para editar")
+            index = _prompt_step_index(
+                len(steps),
+                "Número do passo para editar",
+                console,
+            )
             if index is None:
                 continue
-            steps[index] = _prompt_step_form(steps[index], index)
+            steps[index] = _prompt_step_form(steps[index], index, console)
             continue
 
         if action == "a":
-            new_step = _prompt_step_form(_new_default_step(len(steps) + 1), len(steps))
+            new_step = _prompt_step_form(_new_default_step(len(steps) + 1), len(steps), console)
             steps.append(new_step)
             continue
 
         if action == "r":
-            index = _prompt_step_index(len(steps), "Número do passo para remover")
+            index = _prompt_step_index(
+                len(steps),
+                "Número do passo para remover",
+                console,
+            )
             if index is None:
                 continue
             step = steps[index]
-            if typer.confirm(
+            if Confirm.ask(
                 f"Remover passo #{index + 1} ({step.key})?",
                 default=False,
-                show_default=True,
+                console=console,
             ):
                 steps.pop(index)
             continue
 
         if action == "m":
             if len(steps) < 2:
-                typer.echo("É necessário ter pelo menos 2 passos para reordenar.")
+                console.print("[yellow]É necessário ter pelo menos 2 passos para reordenar.[/yellow]")
                 continue
             source_index = _prompt_step_index(
                 len(steps),
                 "Mover passo de qual posição?",
+                console,
             )
             if source_index is None:
                 continue
             target_index = _prompt_step_index(
                 len(steps),
                 "Mover para qual posição?",
+                console,
                 default_value=source_index + 1,
             )
             if target_index is None:
@@ -611,16 +702,16 @@ def _run_simple_flow_editor_session(initial_steps: list[FlowStep]) -> tuple[list
 
         if action == "s":
             if not steps:
-                typer.echo("O fluxo precisa ter pelo menos um passo antes de salvar.")
+                console.print("[yellow]O fluxo precisa ter pelo menos um passo antes de salvar.[/yellow]")
                 continue
             return steps, True
 
         if action == "q":
-            if typer.confirm("Sair sem salvar alterações?", default=False, show_default=True):
+            if Confirm.ask("Sair sem salvar alterações?", default=False, console=console):
                 return steps, False
             continue
 
-        typer.echo("Ação inválida. Use: e, a, r, m, s ou q.")
+        console.print("[yellow]Ação inválida. Use: e, a, r, m, s ou q.[/yellow]")
 
 
 def _serialize_flow_steps(steps: list[FlowStep]) -> dict[str, list[dict[str, object]]]:
@@ -665,32 +756,39 @@ def _save_flow_steps(flow_path: Path, steps: list[FlowStep]) -> None:
         typer.echo("Aviso: assinatura sidecar anterior invalidada e apagada.")
 
 
-def _resolve_save_path(flow_path: Path | None) -> Path:
+def _resolve_save_path(flow_path: Path | None, console: Console) -> Path:
     if flow_path is not None:
         return flow_path
     suggested_path = str(Path.cwd() / "flow.json")
-    raw_path = typer.prompt("Salvar fluxo em", default=suggested_path).strip()
+    raw_path = Prompt.ask("Salvar fluxo em", default=suggested_path, console=console).strip()
     return Path(raw_path).expanduser()
 
 
 def _run_flow_edit_simple(flow_path: Path | None) -> None:
+    console = Console()
     steps = _load_flow_steps_for_editor(flow_path)
-    typer.echo("Editor simples de flow.json (modo terminal).")
-    typer.echo("Dica: use \\n para inserir quebra de linha em instruction/input_template.")
+    console.print(
+        Panel.fit(
+            "Editor simples de flow.json.\n"
+            "Dica: use \\n para inserir quebra de linha em instruction/input_template.",
+            title="Council Flow Editor (Simple)",
+            border_style="cyan",
+        )
+    )
 
-    updated_steps, should_save = _run_simple_flow_editor_session(steps)
+    updated_steps, should_save = _run_simple_flow_editor_session(steps, console)
     if not should_save:
-        typer.echo("Edição cancelada sem salvar.")
+        console.print("[yellow]Edição cancelada sem salvar.[/yellow]")
         return
 
-    target_path = _resolve_save_path(flow_path)
+    target_path = _resolve_save_path(flow_path, console)
     try:
         _save_flow_steps(target_path, updated_steps)
     except OSError as exc:
-        typer.echo(f"Erro ao salvar fluxo em '{target_path}': {exc}")
+        console.print(f"[red]Erro ao salvar fluxo em '{target_path}': {exc}[/red]")
         raise typer.Exit(code=1)
 
-    typer.echo(f"Fluxo salvo em: {target_path}")
+    console.print(f"[green]Fluxo salvo em: {target_path}[/green]")
 
 
 def _run_flow_edit_tui(flow_path: Path | None) -> None:
