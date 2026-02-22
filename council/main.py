@@ -4,6 +4,10 @@ import typer
 from pathlib import Path
 from typing import Optional
 from typing_extensions import Annotated
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from council.audit_log import get_audit_logger, log_event
 from council.ui import UI
@@ -125,14 +129,38 @@ def _describe_resolved_flow_source(resolved_config: ResolvedFlowConfig) -> str:
     return resolved_config.source
 
 
-def _render_doctor_status_line(status: BinaryPrerequisiteStatus) -> str:
+def _doctor_status_label_and_style(status: BinaryPrerequisiteStatus) -> tuple[str, str]:
     if not status.is_available:
-        return f"[MISSING] {status.binary}: não encontrado no PATH"
-
-    resolved_path = status.resolved_path or "(caminho desconhecido)"
+        return "MISSING", "bold red"
     if status.is_world_writable_location:
-        return f"[WARN] {status.binary}: {resolved_path} (diretório gravável por outros usuários)"
-    return f"[OK] {status.binary}: {resolved_path}"
+        return "WARN", "bold yellow"
+    return "OK", "bold green"
+
+
+def _build_doctor_status_table(statuses: list[BinaryPrerequisiteStatus]) -> Table:
+    table = Table(title="Diagnóstico de binários", expand=False, header_style="bold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Binário", no_wrap=True)
+    table.add_column("Caminho resolvido")
+    table.add_column("Observação")
+
+    for status in statuses:
+        status_label, status_style = _doctor_status_label_and_style(status)
+        resolved_path = status.resolved_path or "-"
+        if not status.is_available:
+            detail = "Não encontrado no PATH"
+        elif status.is_world_writable_location:
+            detail = "Diretório gravável por outros usuários"
+        else:
+            detail = "-"
+        table.add_row(
+            Text(f"[{status_label}]", style=status_style),
+            status.binary,
+            resolved_path,
+            detail,
+        )
+
+    return table
 
 
 def _resolve_existing_file(raw_path: str, *, label: str) -> Path:
@@ -334,11 +362,18 @@ def doctor(
         typer.echo(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
+    console = Console()
     statuses = evaluate_flow_prerequisites(flow_steps)
     missing = find_missing_binaries(statuses)
     world_writable = find_world_writable_binary_locations(statuses)
-
-    typer.echo(f"Fonte do fluxo: {_describe_resolved_flow_source(resolved_config)}")
+    flow_source_description = _describe_resolved_flow_source(resolved_config)
+    console.print(
+        Panel.fit(
+            f"Fonte do fluxo: {flow_source_description}",
+            title="[bold cyan]Council Doctor[/bold cyan]",
+            border_style="cyan",
+        )
+    )
     if not statuses:
         log_event(
             audit_logger,
@@ -346,11 +381,38 @@ def doctor(
             level=logging.INFO,
             flow_source=resolved_config.source,
         )
-        typer.echo("Nenhum comando encontrado no fluxo.")
+        console.print(
+            Panel(
+                "Nenhum comando encontrado no fluxo.",
+                title="[bold yellow]Aviso[/bold yellow]",
+                border_style="yellow",
+                expand=False,
+            )
+        )
         return
 
-    for status in statuses:
-        typer.echo(_render_doctor_status_line(status))
+    console.print(_build_doctor_status_table(statuses))
+    safe_total = len(
+        [
+            status
+            for status in statuses
+            if status.is_available and not status.is_world_writable_location
+        ]
+    )
+    summary_border = "red" if missing else ("yellow" if world_writable else "green")
+    console.print(
+        Panel(
+            (
+                f"Total verificado: {len(statuses)}\n"
+                f"OK: {safe_total}\n"
+                f"Avisos: {len(world_writable)}\n"
+                f"Ausentes: {len(missing)}"
+            ),
+            title="[bold]Resumo[/bold]",
+            border_style=summary_border,
+            expand=False,
+        )
+    )
 
     if world_writable:
         log_event(
@@ -358,6 +420,17 @@ def doctor(
             "main.doctor.world_writable_warning",
             level=logging.WARNING,
             risky_binaries=sorted(status.binary for status in world_writable),
+        )
+        console.print(
+            Panel(
+                (
+                    "Foram detectados binários em diretórios graváveis por outros usuários. "
+                    "Revise os avisos acima."
+                ),
+                title="[bold yellow]Atenção de segurança[/bold yellow]",
+                border_style="yellow",
+                expand=False,
+            )
         )
 
     if missing:
@@ -369,7 +442,14 @@ def doctor(
             missing_binaries=sorted(status.binary for status in missing),
             total_binaries=len(statuses),
         )
-        typer.echo(f"Pré-requisitos ausentes no PATH: {missing_bins}.")
+        console.print(
+            Panel(
+                f"Pré-requisitos ausentes no PATH: {missing_bins}.",
+                title="[bold red]Falha[/bold red]",
+                border_style="red",
+                expand=False,
+            )
+        )
         raise typer.Exit(code=1)
 
     log_event(
@@ -378,7 +458,14 @@ def doctor(
         level=logging.INFO,
         total_binaries=len(statuses),
     )
-    typer.echo("Pré-requisitos atendidos.")
+    console.print(
+        Panel(
+            "Pré-requisitos atendidos.",
+            title="[bold green]Sucesso[/bold green]",
+            border_style="green",
+            expand=False,
+        )
+    )
 
 
 @app.command()
