@@ -48,7 +48,29 @@ export COUNCIL_FLOW_CONFIG=flow.meu.json
 council run "Seu prompt"
 ```
 
-## 2.1 Assinatura de Integridade e Autoria (DEF-04)
+### 2.1 Interface Visual de Edição (TUI)
+
+O Council possui um editor visual nativo no terminal baseado na biblioteca Textual para facilitar a criação e edição do `flow.json` sem precisar lidar com chaves e sintaxe JSON manualmente.
+
+Para abrir o editor:
+
+```bash
+# Inicia edição num arquivo exisente (ou cria um novo se não existir)
+council flow edit flow.meu.json
+
+# Se não passar nada, o TUI inicializa com o template padrão 
+# e pedirá para você salvar o arquivo no disco (Save As)
+council flow edit
+```
+
+Na interface interativa, você pode:
+- Adicionar ou remover passos visualmente.
+- Reordenar etapas do fluxo (Up/Down).
+- Ter validação inline do comando e campos críticos antes de salvar.
+
+> Quando você salva um fluxo existente pelo editor (Ctrl+S), se houver um arquivo de assinatura `.sig` correspondente, **ele será deletado automaticamente**, visto que a edição invalida a segurança criptográfica anterior. Você precisará assinar o arquivo novamente.
+ 
+## 2.2 Assinatura de Integridade e Autoria (DEF-04)
 
 Para proteger `flow.json` contra adulteração e validar autoria, o Council suporta assinatura Ed25519 com arquivo sidecar `flow.json.sig`.
 
