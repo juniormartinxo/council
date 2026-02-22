@@ -58,13 +58,23 @@ Resets Feb 26, 2pm (America/Sao_Paulo)
 
 def test_extract_model_and_tier_from_output_supports_colon_and_table_formats() -> None:
     codex_like_output = "Model: gpt-5.3-codex (reasoning xhigh)\n"
+    codex_banner_output = (
+        "OpenAI Codex (v0.104.0)\n"
+        "model:    gpt-5.3-codex xhigh    /model to change\n"
+    )
     gemini_about_output = (
         "Model           Auto (Gemini 3)\n"
         "Tier            Gemini Code Assist in Google One AI Pro\n"
     )
+    claude_model_output = (
+        "Estou rodando o **Claude Opus 4.6** "
+        "(model ID: `claude-opus-4-6`).\n"
+    )
 
     assert provider_limits._extract_model_from_output(codex_like_output) == "gpt-5.3-codex (reasoning xhigh)"
+    assert provider_limits._extract_model_from_output(codex_banner_output) == "gpt-5.3-codex xhigh"
     assert provider_limits._extract_model_from_output(gemini_about_output) == "Auto (Gemini 3)"
+    assert provider_limits._extract_model_from_output(claude_model_output) == "claude-opus-4-6"
     assert (
         provider_limits._extract_tier_from_output(gemini_about_output)
         == "Gemini Code Assist in Google One AI Pro"
@@ -101,7 +111,38 @@ def test_probe_gemini_uses_about_as_fallback_for_model_and_tier() -> None:
     assert "tier Gemini Code Assist in Google One AI Pro" in result.summary
 
 
+def test_probe_gemini_recovers_model_from_non_interactive_about_probe() -> None:
+    about_child = _build_interactive_child(
+        [
+            (0, ""),
+            (0, "No model details here"),
+            (0, ""),
+        ]
+    )
+    stats_child = _build_interactive_child(
+        [
+            (0, ""),
+            (0, "No quota information found"),
+            (0, ""),
+        ]
+    )
+    about_probe_child = Mock()
+    about_probe_child.before = "Model: Auto (Gemini 3)\nTier: AI Pro\n"
+    about_probe_child.exitstatus = 0
+
+    with patch("pexpect.spawn", side_effect=[about_child, about_probe_child, stats_child]):
+        result = provider_limits._probe_gemini(timeout_seconds=30)
+
+    assert result.status == "unavailable"
+    assert result.model == "Auto (Gemini 3)"
+    assert "tier AI Pro" in result.summary
+
+
 def test_probe_claude_reads_usage_from_interactive_repl() -> None:
+    model_child = Mock()
+    model_child.before = "Estou rodando o **Claude Opus 4.6** (model ID: `claude-opus-4-6`)."
+    model_child.exitstatus = 0
+
     usage_child = _build_interactive_child(
         [
             (0, ""),
@@ -120,10 +161,11 @@ def test_probe_claude_reads_usage_from_interactive_repl() -> None:
         ]
     )
 
-    with patch("pexpect.spawn", return_value=usage_child):
+    with patch("pexpect.spawn", side_effect=[model_child, usage_child]):
         result = provider_limits._probe_claude(timeout_seconds=30)
 
     assert result.status == "ok"
+    assert result.model == "claude-opus-4-6"
     assert len(result.entries) == 2
     assert result.entries[0].window == "current session"
     assert result.entries[0].percent_type == "used"
@@ -132,7 +174,40 @@ def test_probe_claude_reads_usage_from_interactive_repl() -> None:
     assert result.entries[1].percent_value == 29
 
 
+def test_probe_claude_tries_slash_model_when_plain_model_has_no_parse() -> None:
+    plain_model_child = Mock()
+    plain_model_child.before = "Model information unavailable."
+    plain_model_child.exitstatus = 0
+    slash_model_child = Mock()
+    slash_model_child.before = "Current model ID: `claude-opus-4-6`"
+    slash_model_child.exitstatus = 0
+    usage_child = _build_interactive_child(
+        [
+            (0, ""),
+            (
+                0,
+                (
+                    "Current session\n"
+                    "2% used\n"
+                    "Resets 7pm (America/Sao_Paulo)\n"
+                ),
+            ),
+            (0, ""),
+        ]
+    )
+
+    with patch("pexpect.spawn", side_effect=[plain_model_child, slash_model_child, usage_child]):
+        result = provider_limits._probe_claude(timeout_seconds=30)
+
+    assert result.status == "ok"
+    assert result.model == "claude-opus-4-6"
+
+
 def test_probe_claude_falls_back_to_cost_when_usage_has_no_entries() -> None:
+    model_child = Mock()
+    model_child.before = "Estou rodando o **Claude Opus 4.6** (model ID: `claude-opus-4-6`)."
+    model_child.exitstatus = 0
+
     usage_child = _build_interactive_child(
         [
             (0, ""),
@@ -155,11 +230,12 @@ def test_probe_claude_falls_back_to_cost_when_usage_has_no_entries() -> None:
         ]
     )
 
-    with patch("pexpect.spawn", side_effect=[usage_child, cost_child]) as spawn_mock:
+    with patch("pexpect.spawn", side_effect=[model_child, usage_child, cost_child]) as spawn_mock:
         result = provider_limits._probe_claude(timeout_seconds=30)
 
-    assert spawn_mock.call_count == 2
+    assert spawn_mock.call_count == 3
     assert result.status == "ok"
+    assert result.model == "claude-opus-4-6"
     assert len(result.entries) == 1
     assert result.entries[0].window == "current session"
     assert result.entries[0].percent_value == 5
