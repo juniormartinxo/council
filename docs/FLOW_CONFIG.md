@@ -81,6 +81,7 @@ No editor TUI, você pode:
 No editor `simple`, você pode:
 - Listar passos atuais.
 - Editar, adicionar, remover e mover passos por índice.
+- Escolher `role_desc` por opções sugeridas (numéricas) ou texto livre.
 - Salvar no final, direto pelo terminal.
 
 > Quando você salva um fluxo por qualquer editor, se houver um arquivo de assinatura `.sig` correspondente, **ele será deletado automaticamente**, visto que a edição invalida a segurança criptográfica anterior. Você precisará assinar o arquivo novamente.
