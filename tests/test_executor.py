@@ -230,18 +230,39 @@ def test_run_cli_raises_timeout_and_terminates_process(monkeypatch: pytest.Monke
     assert "timeout" in ui.errors[0].lower()
 
 
-def test_run_cli_honors_previous_cancel_request(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_cli_clears_previous_cancel_request(monkeypatch: pytest.MonkeyPatch) -> None:
     ui = DummyUI()
     executor = Executor(ui)
     executor.request_cancel()
+    process = FakeProcess(stdout_lines=["ok\n"])
+    _patch_popen(monkeypatch, process)
 
-    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
-        raise AssertionError("Popen should not be called when execution is canceled.")
+    output = executor.run_cli("tool", "payload")
+    assert output == "ok"
+    assert ui.errors == []
 
-    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+
+def test_run_cli_aborts_when_cancel_requested_during_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+    process = FakeProcess(stdout_lines=["line 1\n", "line 2\n"])
+    _patch_popen(monkeypatch, process)
+    terminated = {"called": False}
+
+    def fake_terminate(_: FakeProcess) -> None:
+        terminated["called"] = True
+
+    monkeypatch.setattr(executor, "_terminate_process", fake_terminate)
+
+    def cancel_on_first_line(_: str) -> None:
+        executor.request_cancel()
 
     with pytest.raises(ExecutionAborted):
-        executor.run_cli("tool", "payload")
+        executor.run_cli("tool", "payload", on_output=cancel_on_first_line)
+
+    assert terminated["called"] is True
 
 
 def test_run_cli_rejects_input_above_configured_limit(monkeypatch: pytest.MonkeyPatch) -> None:
