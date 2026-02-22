@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import time
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from council.config import (
     load_flow_steps,
     resolve_flow_config,
 )
+from council.audit_log import get_audit_logger, log_event
 from council.executor import CommandError, ExecutionAborted, Executor
 from council.history_store import HistoryStore
 from council.orchestrator import Orchestrator
@@ -244,6 +246,7 @@ class CouncilTextualApp(App[None]):
         self._current_step_id = self.GENERAL_STEP_ID
         self._executor_lock = threading.Lock()
         self._active_executor: Executor | None = None
+        self._audit_logger = get_audit_logger()
         self._trusted_auto_flow_paths: set[str] = set()
         self._pending_auto_flow_confirmation: str | None = None
         self._prompt_history = self._normalize_prompt_history(persisted_state.get("prompt_history"))
@@ -973,10 +976,27 @@ class CouncilTextualApp(App[None]):
         resolved_flow_config: ResolvedFlowConfig | None = None,
     ) -> None:
         ui = TextualUIAdapter(self)
+        log_event(
+            self._audit_logger,
+            "tui.run.invoked",
+            level=logging.INFO,
+            flow_config_arg=flow_config or "",
+            prompt_chars=len(prompt),
+            flow_config_source=(
+                resolved_flow_config.source if resolved_flow_config is not None else "default"
+            ),
+        )
         try:
             state = CouncilState()
             executor = Executor(ui)
         except ValueError as exc:
+            log_event(
+                self._audit_logger,
+                "tui.run.invalid_limits",
+                level=logging.ERROR,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             ui.show_error(f"Configuração inválida de limites: {exc}")
             self._dispatch_ui(self._set_running, False)
             return
@@ -986,6 +1006,13 @@ class CouncilTextualApp(App[None]):
         try:
             flow_steps = load_flow_steps(flow_config, resolved_config=resolved_flow_config)
         except ConfigError as exc:
+            log_event(
+                self._audit_logger,
+                "tui.run.invalid_flow_config",
+                level=logging.ERROR,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
             self._dispatch_ui(self._set_running, False)
             return
@@ -994,6 +1021,13 @@ class CouncilTextualApp(App[None]):
         missing_binaries = find_missing_binaries(prerequisite_statuses)
         if missing_binaries:
             missing_bins_text = ", ".join(sorted(status.binary for status in missing_binaries))
+            log_event(
+                self._audit_logger,
+                "tui.run.prerequisites_missing",
+                level=logging.ERROR,
+                missing_binaries=sorted(status.binary for status in missing_binaries),
+                planned_steps=len(flow_steps),
+            )
             ui.show_error(
                 (
                     "Pré-requisitos ausentes no PATH para executar o fluxo: "
@@ -1022,6 +1056,13 @@ class CouncilTextualApp(App[None]):
         try:
             history_store = HistoryStore()
         except OSError as exc:
+            log_event(
+                self._audit_logger,
+                "tui.run.history_store_unavailable",
+                level=logging.ERROR,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             ui.show_error(f"Aviso: persistência estruturada indisponível: {exc}")
 
         orchestrator = Orchestrator(
@@ -1041,8 +1082,23 @@ class CouncilTextualApp(App[None]):
         try:
             orchestrator.run_flow(prompt)
         except Exception as exc:
+            log_event(
+                self._audit_logger,
+                "tui.run.unexpected_error",
+                level=logging.ERROR,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             ui.show_error(f"Erro inesperado na execução: {exc}")
         finally:
+            log_event(
+                self._audit_logger,
+                "tui.run.finished",
+                level=logging.INFO,
+                flow_config_source=(
+                    resolved_flow_config.source if resolved_flow_config is not None else "default"
+                ),
+            )
             self._feedback_event.set()
             with self._executor_lock:
                 self._active_executor = None
