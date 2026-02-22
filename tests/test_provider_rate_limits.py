@@ -108,8 +108,7 @@ def test_probe_gemini_uses_about_as_fallback_for_model_and_tier(monkeypatch) -> 
 
 def test_run_probe_command_uses_pexpect_and_returns_output() -> None:
     child = Mock()
-    child.before = "prefix "
-    child.read.return_value = "\x1b[32mok\x1b[0m"
+    child.before = "prefix \x1b[32mok\x1b[0m"
     child.exitstatus = 0
 
     with patch("pexpect.spawn", return_value=child) as spawn_mock:
@@ -122,7 +121,7 @@ def test_run_probe_command_uses_pexpect_and_returns_output() -> None:
         encoding="utf-8",
     )
     child.expect.assert_called_once_with(pexpect.EOF)
-    child.read.assert_called_once()
+    child.read.assert_not_called()
     child.close.assert_called_once_with()
     assert result.return_code == 0
     assert result.timed_out is False
@@ -146,22 +145,22 @@ def test_run_probe_command_handles_timeout() -> None:
 
 
 def test_run_probe_command_handles_missing_binary() -> None:
+    message = "The command was not found or was not executable: codex."
     with patch(
         "pexpect.spawn",
-        side_effect=pexpect.exceptions.ExceptionPexpect("The command was not found or was not executable: codex."),
+        side_effect=pexpect.exceptions.ExceptionPexpect(message),
     ):
         result = provider_limits._run_probe_command(["codex", "exec", "/status"], timeout_seconds=1)
 
     assert result.return_code is None
     assert result.timed_out is False
-    assert "not found" in (result.error or "").lower()
+    assert result.error == message
     assert result.output == ""
 
 
 def test_run_probe_command_preserves_nonzero_exit_code() -> None:
     child = Mock()
-    child.before = ""
-    child.read.return_value = "invalid request"
+    child.before = "invalid request"
     child.exitstatus = 2
 
     with patch("pexpect.spawn", return_value=child):
