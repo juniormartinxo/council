@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 import council.tui as tui_module
-from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, ResolvedFlowConfig
+from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, FlowStep, ResolvedFlowConfig
 from council.paths import COUNCIL_HOME_ENV_VAR
+from council.prerequisites import BinaryPrerequisiteStatus
 from council.tui import CouncilTextualApp
 from council.tui_state import TUI_STATE_PASSPHRASE_ENV_VAR
 
@@ -184,6 +185,44 @@ def test_run_council_flow_handles_invalid_runtime_limits(
     app.run_council_flow(prompt="prompt", flow_config=None)
 
     assert any("Configuração inválida de limites" in message for message, _ in statuses)
+    assert ("running=False", "state") in statuses
+
+
+def test_run_council_flow_blocks_when_prerequisites_are_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    statuses: list[tuple[str, str]] = []
+
+    step = FlowStep(
+        key="step",
+        agent_name="Agent",
+        role_desc="Role",
+        command="codex exec --skip-git-repo-check",
+        instruction="instruction",
+    )
+
+    monkeypatch.setattr(tui_module, "CouncilState", lambda: object())
+    monkeypatch.setattr(tui_module, "Executor", lambda _ui: object())
+    monkeypatch.setattr(tui_module, "load_flow_steps", lambda *_args, **_kwargs: [step])
+    monkeypatch.setattr(
+        tui_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            BinaryPrerequisiteStatus(
+                binary="codex",
+                resolved_path=None,
+                is_available=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(app, "show_error", lambda message: statuses.append((message, "red")))
+    monkeypatch.setattr(app, "_dispatch_ui", lambda callback, *args: callback(*args))
+    monkeypatch.setattr(app, "_set_running", lambda running: statuses.append((f"running={running}", "state")))
+
+    app.run_council_flow(prompt="prompt", flow_config=None)
+
+    assert any("Pré-requisitos ausentes no PATH" in message for message, _ in statuses)
     assert ("running=False", "state") in statuses
 
 
