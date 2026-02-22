@@ -245,16 +245,25 @@ Um agente que retorna output excessivamente grande causa:
 
 ## 🟢 Severidade Baixa
 
-### SEC-07 — `_cancel_event` nunca resetado entre execuções
+### SEC-07 — `_cancel_event` nunca resetado entre execuções (✔️ Mitigado em 2026-02-22)
 
-**Localização:** `council/executor.py` — `Executor.__init__()`.
+**Localização:** `council/executor.py` — `Executor.run_cli()`.
 
 **Descrição:**
 O `threading.Event` de cancelamento é setado permanentemente por `request_cancel()` e nunca é limpo. Na TUI isso não é problema porque um novo `Executor` é criado por execução. Porém, integração externa que reutilize a instância terá todas as execuções subsequentes abortadas imediatamente na verificação `if self._cancel_event.is_set()`.
 
-**Mitigação sugerida:**
-- Adicionar `self._cancel_event.clear()` no início de `run_cli()`.
-- Ou documentar que o `Executor` é single-use após cancelamento.
+**Status atual (mitigado em 2026-02-22):**
+- `Executor.run_cli()` agora limpa `_cancel_event` no início de cada execução para evitar estado de cancelamento residual entre runs.
+- Cobertura de testes atualizada para validar:
+  - reuso da instância após `request_cancel()`;
+  - cancelamento durante streaming de saída com interrupção do subprocesso.
+
+**Risco residual:**
+- Chamadas de `request_cancel()` antes do início de uma nova execução deixam de “persistir” para o próximo run por design; o cancelamento continua suportado durante a execução ativa.
+
+**Evidência:**
+- Código: `council/executor.py`
+- Testes: `tests/test_executor.py`
 
 ---
 
