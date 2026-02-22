@@ -12,6 +12,7 @@ from council.config import (
     FLOW_CONFIG_SOURCE_DEFAULT,
     FLOW_CONFIG_SOURCE_ENV,
     FLOW_CONFIG_SOURCE_USER,
+    FlowStep,
     ResolvedFlowConfig,
 )
 from council.history_store import HistoryStore
@@ -28,6 +29,16 @@ class _DummyUI:
 
 def _state_file(tmp_path: Path) -> Path:
     return tmp_path / ".council-home" / "tui_state.json"
+
+
+def _sample_step(command: str = "claude -p") -> FlowStep:
+    return FlowStep(
+        key="step",
+        agent_name="Agent",
+        role_desc="Role",
+        command=command,
+        instruction="instruction",
+    )
 
 
 def test_requires_implicit_flow_confirmation_for_cwd_and_env() -> None:
@@ -198,3 +209,98 @@ def test_history_clear_forwards_resolved_passphrase(
 
     assert result.exit_code == 0
     assert captured["passphrase"] == "senha-vinda-do-ambiente"
+
+
+def test_run_exits_when_binary_prerequisite_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = _DummyUI()
+
+    monkeypatch.setattr(main_module, "UI", lambda: ui)
+    monkeypatch.setattr(main_module, "CouncilState", lambda: object())
+    monkeypatch.setattr(main_module, "Executor", lambda _: object())
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "load_flow_steps",
+        lambda *_args, **_kwargs: [_sample_step("codex exec --skip-git-repo-check")],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="codex",
+                resolved_path=None,
+                is_available=False,
+            )
+        ],
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        main_module.run(prompt="prompt", flow_config=None)
+
+    assert exc_info.value.exit_code == 1
+    assert len(ui.errors) == 1
+    assert "Pré-requisitos ausentes no PATH" in ui.errors[0]
+
+
+def test_doctor_exits_with_error_when_binary_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=Path("/tmp/flow.json"), source=FLOW_CONFIG_SOURCE_CLI),
+    )
+    monkeypatch.setattr(main_module, "load_flow_steps", lambda *_args, **_kwargs: [_sample_step("codex exec")])
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="codex",
+                resolved_path=None,
+                is_available=False,
+            )
+        ],
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "Fonte do fluxo: --flow-config (/tmp/flow.json)" in result.stdout
+    assert "[MISSING] codex: não encontrado no PATH" in result.stdout
+    assert "Pré-requisitos ausentes no PATH: codex." in result.stdout
+
+
+def test_doctor_reports_success_when_all_prerequisites_are_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT),
+    )
+    monkeypatch.setattr(main_module, "load_flow_steps", lambda *_args, **_kwargs: [_sample_step("claude -p")])
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="claude",
+                resolved_path="/usr/bin/claude",
+                is_available=True,
+                is_world_writable_location=False,
+            )
+        ],
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "Fonte do fluxo: default interno" in result.stdout
+    assert "[OK] claude: /usr/bin/claude" in result.stdout
+    assert "Pré-requisitos atendidos." in result.stdout
