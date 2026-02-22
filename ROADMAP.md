@@ -17,13 +17,14 @@ Antes de avançar em features de alto impacto, a base técnica precisa sustentar
 *   **Empacotamento (`pyproject.toml`):** O Council é distribuível como pacote Python com entry-point `council` via `pip install .` ou `pipx install .`. Comando global `council run` e `council tui` funcionam sem `python -m`.
 *   **Diretório de dados do usuário (`COUNCIL_HOME`):** Módulo `paths.py` centraliza caminhos de armazenamento respeitando `XDG_CONFIG_HOME` (Linux), `~/Library/Application Support` (macOS) e `APPDATA` (Windows). O estado da TUI já persiste em `~/.config/council/tui_state.json`.
 *   **Hardening de artefatos locais sensíveis (SEC-05):** Fallback de clipboard migrou de `/tmp` para `COUNCIL_HOME/clipboard`, com permissão `0o600` para arquivos, `0o700` para diretório, cleanup automático por retenção e cobertura em testes da TUI.
+*   **Hardening do histórico persistido (SEC-03):** Comando `council history clear` para limpeza explícita, documentação de retenção no README/OPERATIONS e opção de criptografia at-rest dos prompts via `COUNCIL_TUI_STATE_PASSPHRASE`.
 *   **Resolução de configuração em cascata:** O `flow.json` é resolvido automaticamente em 4 níveis: `--flow-config` → `$COUNCIL_FLOW_CONFIG` → `./flow.json` (CWD) → `~/.config/council/flow.json` → default interno.
 *   **Testes automatizados (suite mínima `pytest`):** Base de testes criada em `tests/` com cobertura de smoke tests para `config.py` (parsing de JSON, validação de duplicatas/chaves reservadas, templates e hardening de `command` com `which()` + bloqueio de operadores) e `executor.py` (preparação de comandos, placeholder `{input}`, variações de prompt do Gemini, sucesso/erro/timeout/cancelamento em `run_cli`). `pyproject.toml` atualizado com `project.optional-dependencies.dev` e configuração de `pytest`.
 
 ### 🔜 Próximos passos
 
 *   **CI de Testes:** Executar `pytest` automaticamente em pull requests e merges para proteger regressões do core (`config`, `executor`, `orchestrator` e TUI state) e tornar a validação contínua, não apenas local.
-*   **Persistência estruturada (`COUNCIL_HOME/db`):** `CouncilState` é 100% in-memory (`list[Turn]` que nasce e morre com o processo). Introduzir um banco SQLite local para historiar runs completos (prompt, steps executados, outputs, duração, timestamps). Esse banco é pré-requisito direto dos pilares de Telemetria (§4) e Grafos (§1).
+*   **Evolução da persistência estruturada (`COUNCIL_HOME/db`):** O banco SQLite já registra runs e steps (prompt, outputs, duração e timestamps). Próximo ciclo: retenção configurável, exportação e consultas avançadas para suporte ao dashboard de telemetria (§4).
 
 ---
 
@@ -106,7 +107,7 @@ O Council exibe o output nativamente na TUI textualmente (ou guarda em clipboard
 
 ## 6. Ambientes de Sandboxing Seguros (Ferramentas no Terminal)
 
-Se os agentes interagirem entre si e precisarem listar diretórios, criar arquivos massivos ou testar comandos do sistema fora da aprovação da TUI, deixá-los atuar diretamente sobre o host do usuário é um grande risco de segurança e arquitetura. Hoje o `Executor` roda `subprocess.Popen` com `shell=True` diretamente no host.
+Se os agentes interagirem entre si e precisarem listar diretórios, criar arquivos massivos ou testar comandos do sistema fora da aprovação da TUI, deixá-los atuar diretamente sobre o host do usuário é um grande risco de segurança e arquitetura. Hoje o `Executor` roda `subprocess.Popen` com `shell=False` diretamente no host.
 
 > **Dependência:** Este pilar ganha urgência assim que o sistema de Grafos (§1) permitir execução automática de validadores, pois agentes passariam a executar código sem aprovação humana.
 
