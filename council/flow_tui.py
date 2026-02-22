@@ -233,6 +233,14 @@ class FlowConfigApp(App[None]):
         height: 6;
         width: 100%;
     }
+
+    #ta-instruction {
+        height: 10;
+    }
+
+    #ta-input-template {
+        height: 10;
+    }
     
     .warning {
         color: $warning;
@@ -364,10 +372,6 @@ class FlowConfigApp(App[None]):
                                 yield Label("", id="lbl-cmd-warning", classes="warning hidden")
 
                             with Vertical(classes="form-group"):
-                                yield Label("Instrução Base (instruction)")
-                                yield TextArea(id="ta-instruction", language="markdown")
-
-                            with Vertical(classes="form-group"):
                                 yield Label("Opções")
                                 yield Checkbox("É resultado de código? (is_code)", id="cb-is-code")
 
@@ -406,6 +410,10 @@ class FlowConfigApp(App[None]):
                                     id="sel-style",
                                     allow_blank=False,
                                 )
+
+                            with Vertical(classes="form-group"):
+                                yield Label("Instrução Base (instruction)")
+                                yield TextArea(id="ta-instruction", language="markdown")
 
                             with Vertical(classes="form-group"):
                                 yield Label("Template de Input (input_template)")
