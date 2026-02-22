@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from council.config import FlowStep
+import council.flow_tui as flow_tui_module
 from council.flow_tui import DEFAULT_INPUT_TEMPLATE, FlowConfigApp
 
 
@@ -42,6 +43,11 @@ class _StubInput:
         self.value = value
 
 
+class _StubSelect:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
 class _StubTextArea:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -63,10 +69,9 @@ def test_save_form_to_step_replaces_frozen_flow_step() -> None:
     app.steps = [original_step]
 
     widgets = {
-        "#in-key": _StubInput("new-key"),
-        "#in-agent-name": _StubInput("new-agent"),
-        "#in-role-desc": _StubInput("new-role"),
-        "#in-style": _StubInput("new-style"),
+        "#sel-step-profile": _StubSelect("new-key||new-role"),
+        "#sel-agent-name": _StubSelect("new-agent"),
+        "#sel-style": _StubSelect("new-style"),
         "#in-command": _StubInput("codex exec --skip-git-repo-check"),
         "#ta-instruction": _StubTextArea("new instruction"),
         "#ta-input-template": _StubTextArea(""),
@@ -95,3 +100,33 @@ def test_save_form_to_step_replaces_frozen_flow_step() -> None:
     assert updated_step.max_input_chars == 1000
     assert updated_step.max_output_chars == 2000
     assert updated_step.max_context_chars == 3000
+
+
+def test_resolve_default_command_for_agent() -> None:
+    assert FlowConfigApp._resolve_default_command_for_agent("Gemini") == "gemini -p {input}"
+    assert FlowConfigApp._resolve_default_command_for_agent("Codex") == "codex exec --skip-git-repo-check"
+    assert FlowConfigApp._resolve_default_command_for_agent("Desconhecido") is None
+
+
+def test_load_initial_data_populates_first_step(monkeypatch) -> None:
+    sample_step = _build_step("template")
+    app = FlowConfigApp(config_path=None)
+
+    class _StubListView:
+        def __init__(self) -> None:
+            self.children = [object()]
+            self.index = None
+
+    list_view = _StubListView()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(flow_tui_module, "get_default_flow_steps", lambda: [sample_step])
+    app._refresh_list = lambda: None
+    app.query_one = lambda selector, _widget_type=None: list_view if selector == "#step-list" else None  # type: ignore[assignment]
+    app._populate_form = lambda step: captured.update({"step": step})
+
+    app._load_initial_data()
+
+    assert app.current_step_index == 0
+    assert captured["step"] is sample_step
+    assert list_view.index == 0
