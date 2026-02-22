@@ -271,9 +271,15 @@ O `threading.Event` de cancelamento é setado permanentemente por `request_cance
 
 Recomendações que não são vulnerabilidades diretas, mas fortalecem a postura de segurança geral:
 
-### DEF-01 — Validação de pré-requisitos na inicialização
+### DEF-01 — Validação de pré-requisitos na inicialização (✔️ Mitigado em 2026-02-22)
 
-O Council assume que os binários (`claude`, `gemini`, `codex`) existem no `$PATH`, mas nunca verifica. Um comando `council doctor` ou check automático no `run` que valida os binários antes de iniciar o pipeline evitaria falhas desnecessárias e revelaria se um binário presente no `$PATH` é legítimo ou potencialmente substituído (path hijacking).
+**Status atual (mitigado em 2026-02-22):**
+- `council doctor` adicionado para diagnóstico explícito dos binários exigidos pelo fluxo, incluindo caminho resolvido no host.
+- `council run` e TUI passaram a executar preflight automático antes da orquestração, bloqueando execução quando houver binário ausente.
+- O diagnóstico/preflight adiciona aviso quando um binário é resolvido em diretório gravável por outros usuários (sinal de risco para path hijacking).
+
+**Risco residual:**
+- A validação confirma disponibilidade e caminho, mas não comprova integridade/autoria do binário instalado.
 
 ### DEF-02 — Logging estruturado para auditoria
 
@@ -282,9 +288,15 @@ Erros são renderizados na UI mas não são persistidos em arquivo. Um `council.
 - Auditoria de quais comandos foram executados, quando, e com qual resultado
 - Detecção de padrões anômalos (ex: muitas falhas seguidas, comandos inesperados)
 
-### DEF-03 — Timeout dinâmico por step
+### DEF-03 — Timeout dinâmico por step (✔️ Mitigado em 2026-02-21)
 
-O timeout é fixo em 120 segundos para todos os steps. Passos de implementação (`codex exec`) podem levar significativamente mais tempo que passos de revisão. Um campo `timeout` opcional no `FlowStep` evitaria tanto falsos positivos (abortar steps legítimos demorados) quanto riscos de processos travados consumindo recursos indefinidamente.
+**Status atual (mitigado em 2026-02-21):**
+- `FlowStep` suporta `timeout` opcional por passo.
+- Parsing de `flow.json` valida `timeout` como inteiro positivo.
+- `orchestrator` propaga o `timeout` do passo para o `executor`.
+
+**Risco residual:**
+- A escolha de valores inadequados (muito baixos ou muito altos) continua sendo risco operacional de configuração do fluxo.
 
 ### DEF-04 — Assinatura e verificação de `flow.json`
 
