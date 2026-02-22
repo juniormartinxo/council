@@ -1,0 +1,5 @@
+# Copy this file to `.envrc.local` and edit as needed.
+#
+# export COUNCIL_REQUIRE_FLOW_SIGNATURE=1
+# export COUNCIL_FLOW_CONFIG="$PWD/flow.json"
+# export COUNCIL_HOME="$PWD/.council-home"
