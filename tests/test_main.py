@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,23 @@ def test_run_exits_when_runtime_limits_config_is_invalid(monkeypatch) -> None:
     assert exc_info.value.exit_code == 1
     assert len(ui.errors) == 1
     assert "Configuração inválida de limites" in ui.errors[0]
+
+
+def test_run_exits_when_logging_config_is_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = _DummyUI()
+    monkeypatch.setattr(main_module, "UI", lambda: ui)
+    monkeypatch.setattr(
+        main_module,
+        "get_audit_logger",
+        lambda: (_ for _ in ()).throw(ValueError("COUNCIL_LOG_LEVEL inválida")),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        main_module.run(prompt="prompt", flow_config=None)
+
+    assert exc_info.value.exit_code == 1
+    assert len(ui.errors) == 1
+    assert "Configuração inválida de logging" in ui.errors[0]
 
 
 def test_history_clear_reports_when_state_file_is_missing(
@@ -304,3 +322,53 @@ def test_doctor_reports_success_when_all_prerequisites_are_available(
     assert "Fonte do fluxo: default interno" in result.stdout
     assert "[OK] claude: /usr/bin/claude" in result.stdout
     assert "Pré-requisitos atendidos." in result.stdout
+
+
+def test_doctor_emits_audit_logs_for_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, int, dict[str, object]]] = []
+
+    monkeypatch.setattr(main_module, "get_audit_logger", lambda: object())
+    monkeypatch.setattr(
+        main_module,
+        "log_event",
+        lambda _logger, event, *, level=logging.INFO, **data: events.append((event, level, data)),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT),
+    )
+    monkeypatch.setattr(main_module, "load_flow_steps", lambda *_args, **_kwargs: [_sample_step("claude -p")])
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="claude",
+                resolved_path="/usr/bin/claude",
+                is_available=True,
+                is_world_writable_location=False,
+            )
+        ],
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert any(event == "main.doctor.invoked" for event, _level, _data in events)
+    assert any(event == "main.doctor.success" for event, _level, _data in events)
+
+
+def test_doctor_exits_when_logging_config_is_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "get_audit_logger",
+        lambda: (_ for _ in ()).throw(ValueError("COUNCIL_LOG_LEVEL inválida")),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "Configuração inválida de logging" in result.stdout
