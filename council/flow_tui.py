@@ -4,10 +4,11 @@ import shutil
 from pathlib import Path
 from typing import Any, cast
 
-from textual import on, work
+from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
 from textual.events import Mount
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
@@ -20,7 +21,6 @@ from textual.widgets import (
     Static,
     TextArea,
 )
-from textual.widgets._list_view import NoSelection
 
 from council.config import (
     ALLOWED_COMMAND_BINARIES,
@@ -29,6 +29,8 @@ from council.config import (
     load_flow_steps,
 )
 from council.flow_signature import get_signature_file_path
+
+DEFAULT_INPUT_TEMPLATE = "{instruction}\n\n{full_context}"
 
 
 class StepListItem(ListItem):
@@ -48,6 +50,66 @@ class StepListItem(ListItem):
 
     def update_label(self) -> None:
         self._label.update(self._format_label())
+
+
+class SaveAsScreen(ModalScreen[str]):
+    """Tela modal para solicitar o caminho de salvamento do fluxo."""
+
+    CSS = """
+    SaveAsScreen {
+        align: center middle;
+    }
+    #dialog {
+        padding: 1 2;
+        width: 60;
+        height: 15;
+        border: thick $primary 80%;
+        background: $surface;
+    }
+    .dialog-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #dialog-buttons {
+        margin-top: 1;
+        layout: horizontal;
+        align: right middle;
+    }
+    #dialog-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    def __init__(self, default_path: str = "flow.json") -> None:
+        super().__init__()
+        self.default_path = default_path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Salvar Fluxo Como:", classes="dialog-title")
+            yield Input(id="in-path", value=self.default_path)
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Cancelar", variant="default", id="btn-cancel")
+                yield Button("Salvar", variant="success", id="btn-save")
+
+    def on_mount(self) -> None:
+        self.query_one("#in-path", Input).focus()
+
+    @on(Button.Pressed, "#btn-save")
+    def _save(self) -> None:
+        path = self.query_one("#in-path", Input).value.strip()
+        if path:
+            self.dismiss(path)
+
+    @on(Button.Pressed, "#btn-cancel")
+    def _cancel(self) -> None:
+        self.dismiss("")
+
+    @on(Input.Submitted, "#in-path")
+    def _submit(self, event: Input.Submitted) -> None:
+        path = event.value.strip()
+        if path:
+            self.dismiss(path)
 
 
 class FlowConfigApp(App[None]):
@@ -172,8 +234,6 @@ class FlowConfigApp(App[None]):
             self.sub_title = "Novo Arquivo (Não Salvo)"
             self.steps = get_default_flow_steps()
             self.is_new_file = True
-            if self.config_path is None:
-                self.config_path = Path.cwd() / "flow.json"
 
         self._refresh_list()
         
@@ -353,7 +413,9 @@ class FlowConfigApp(App[None]):
         step.command = self.query_one("#in-command", Input).value.strip() or "echo 'no command'"
         
         step.instruction = self.query_one("#ta-instruction", TextArea).text.strip()
-        step.input_template = self.query_one("#ta-input-template", TextArea).text.strip()
+        step.input_template = (
+            self.query_one("#ta-input-template", TextArea).text.strip() or DEFAULT_INPUT_TEMPLATE
+        )
         step.is_code = self.query_one("#cb-is-code", Checkbox).value
         
         timeout_val = self._parse_int_field(self.query_one("#in-timeout", Input).value)
@@ -381,7 +443,7 @@ class FlowConfigApp(App[None]):
             role_desc="Descrição do Papel",
             command="",
             instruction="",
-            input_template="{instruction}\\n\\n{full_context}"
+            input_template=DEFAULT_INPUT_TEMPLATE
         )
         self.steps.append(new_step)
         self._refresh_list()
@@ -446,8 +508,18 @@ class FlowConfigApp(App[None]):
              self._save_form_to_step(self.current_step_index)
              
         if not self.config_path:
-             self.notify("Sem caminho de destino definido.", severity="error")
-             return
+            def check_reply(path_str: str | None) -> None:
+                if path_str:
+                    self.config_path = Path(path_str).expanduser()
+                    self._execute_save()
+            self.push_screen(SaveAsScreen(), check_reply)
+            return
+
+        self._execute_save()
+
+    def _execute_save(self) -> None:
+        if not self.config_path:
+            return
 
         try:
              # Serializa manual para manter controle do formato
@@ -460,7 +532,7 @@ class FlowConfigApp(App[None]):
                      "command": s.command,
                      "instruction": s.instruction,
                  }
-                 if s.input_template != "{instruction}\\n\\n{full_context}":
+                 if s.input_template != DEFAULT_INPUT_TEMPLATE:
                      d["input_template"] = s.input_template
                  if s.style != "blue":
                      d["style"] = s.style
