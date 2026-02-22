@@ -1,8 +1,10 @@
 import sys
+import logging
 import typer
 from typing import Optional
 from typing_extensions import Annotated
 
+from council.audit_log import get_audit_logger, log_event
 from council.ui import UI
 from council.state import CouncilState
 from council.executor import Executor
@@ -143,28 +145,64 @@ def run(
     - um fluxo customizado via JSON.
     """
     ui = UI()
+    audit_logger = get_audit_logger()
+    log_event(
+        audit_logger,
+        "main.run.invoked",
+        level=logging.INFO,
+        flow_config_arg=flow_config or "",
+        prompt_chars=len(prompt),
+    )
     try:
         state = CouncilState()
         executor = Executor(ui)
     except ValueError as exc:
+        log_event(
+            audit_logger,
+            "main.run.invalid_limits",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         ui.show_error(f"Configuração inválida de limites: {exc}")
         raise typer.Exit(code=1)
 
     try:
         resolved_config = resolve_flow_config(flow_config)
     except ConfigError as exc:
+        log_event(
+            audit_logger,
+            "main.run.invalid_flow_config",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
     if _requires_implicit_flow_confirmation(resolved_config):
         source_label = _implicit_flow_source_label(resolved_config)
         if not sys.stdin.isatty():
+            log_event(
+                audit_logger,
+                "main.run.implicit_flow_blocked_non_interactive",
+                level=logging.ERROR,
+                flow_source=source_label,
+                flow_path=resolved_config.path,
+            )
             ui.show_error(
                 "Execução bloqueada em modo não interativo: configuração de fluxo detectada via "
                 f"{source_label}. Use --flow-config para confirmar explicitamente o arquivo."
             )
             raise typer.Exit(code=1)
         if not _confirm_implicit_flow_execution(resolved_config):
+            log_event(
+                audit_logger,
+                "main.run.implicit_flow_rejected",
+                level=logging.INFO,
+                flow_source=source_label,
+                flow_path=resolved_config.path,
+            )
             ui.show_error(
                 "Execução cancelada. Forneça --flow-config para confirmar explicitamente o fluxo."
             )
@@ -173,19 +211,47 @@ def run(
     try:
         flow_steps = load_flow_steps(flow_config, resolved_config=resolved_config)
     except ConfigError as exc:
+        log_event(
+            audit_logger,
+            "main.run.invalid_flow_steps",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
     if not _ensure_flow_prerequisites(flow_steps, ui):
+        log_event(
+            audit_logger,
+            "main.run.prerequisites_missing",
+            level=logging.ERROR,
+            planned_steps=len(flow_steps),
+        )
         raise typer.Exit(code=1)
 
     history_store: HistoryStore | None = None
     try:
         history_store = HistoryStore()
     except OSError as exc:
+        log_event(
+            audit_logger,
+            "main.run.history_store_unavailable",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         ui.show_error(f"Aviso: persistência estruturada indisponível: {exc}")
 
     # Inicia a orquestração
+    log_event(
+        audit_logger,
+        "main.run.orchestrator_start",
+        level=logging.INFO,
+        flow_source=resolved_config.source,
+        flow_path=str(resolved_config.path) if resolved_config.path is not None else "",
+        planned_steps=len(flow_steps),
+    )
     orchestrator = Orchestrator(
         state,
         executor,
