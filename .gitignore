@@ -33,6 +33,7 @@ htmlcov/
 # Local flow signing keys
 *.key.pem
 *.pub.pem
+flow.json.sig
 
 # IDE/editor files
 .vscode/
