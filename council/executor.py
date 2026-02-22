@@ -4,8 +4,11 @@ import threading
 import os
 import signal
 import tempfile
+import logging
+from time import perf_counter
 from typing import TextIO
 
+from council.audit_log import get_audit_logger, log_event
 from council.limits import read_positive_int_env
 from council.ui import UI
 
@@ -58,9 +61,11 @@ class Executor:
         self._cancel_event = threading.Event()
         self._process_lock = threading.Lock()
         self._current_process: subprocess.Popen | None = None
+        self._audit_logger = get_audit_logger()
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
+        log_event(self._audit_logger, "executor.cancel.requested", level=logging.INFO)
         with self._process_lock:
             process = self._current_process
 
@@ -89,6 +94,9 @@ class Executor:
         """
         process: subprocess.Popen | None = None
         output_spool: TextIO | None = None
+        command_display = command
+        run_started_perf = perf_counter()
+        error_logged = False
         try:
             # Executor instances can be reused; avoid stale cancel state from previous runs.
             self._cancel_event.clear()
@@ -118,6 +126,17 @@ class Executor:
 
             command_argv, stdin_payload = self._prepare_command(command, input_data)
             command_display = shlex.join(command_argv)
+            log_event(
+                self._audit_logger,
+                "executor.command.start",
+                level=logging.INFO,
+                command=command_display,
+                timeout_seconds=timeout,
+                input_chars=len(input_data),
+                stdin_chars=len(stdin_payload),
+                max_input_chars=effective_max_input_chars,
+                max_output_chars=effective_max_output_chars,
+            )
 
             process = subprocess.Popen(
                 command_argv,
@@ -197,28 +216,95 @@ class Executor:
                 raise ExecutionAborted("Execução abortada pelo usuário.")
             
             if returncode != 0:
+                log_event(
+                    self._audit_logger,
+                    "executor.command.failed",
+                    level=logging.ERROR,
+                    command=command_display,
+                    return_code=returncode,
+                    stderr_chars=len(stderr_content),
+                    duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                )
+                error_logged = True
                 self.ui.show_error(
                     f"Falha ao executar '{command_display}' (Código {returncode}):\n{stderr_content}"
                 )
                 raise CommandError(f"Erro no comando: {command_display}")
 
             if output_spool is None:
-                return "".join(stdout_lines).strip()
+                final_output = "".join(stdout_lines).strip()
+                log_event(
+                    self._audit_logger,
+                    "executor.command.completed",
+                    level=logging.INFO,
+                    command=command_display,
+                    return_code=returncode,
+                    output_chars=len(final_output),
+                    output_truncated=False,
+                    duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                )
+                return final_output
 
             truncated_output = "".join(tail_chunks).strip()
-            return f"{OUTPUT_TRUNCATION_NOTICE}{truncated_output}".strip()
+            final_output = f"{OUTPUT_TRUNCATION_NOTICE}{truncated_output}".strip()
+            log_event(
+                self._audit_logger,
+                "executor.command.completed",
+                level=logging.INFO,
+                command=command_display,
+                return_code=returncode,
+                output_chars=len(final_output),
+                output_truncated=True,
+                duration_ms=int((perf_counter() - run_started_perf) * 1000),
+            )
+            return final_output
             
         except subprocess.TimeoutExpired:
             if process is not None:
                 self._terminate_process(process)
+            log_event(
+                self._audit_logger,
+                "executor.command.timeout",
+                level=logging.ERROR,
+                command=command_display,
+                timeout_seconds=timeout,
+                duration_ms=int((perf_counter() - run_started_perf) * 1000),
+            )
+            error_logged = True
             self.ui.show_error(f"O comando '{command}' atingiu o timeout de {timeout}s.")
             raise CommandError(f"Timeout no comando: {command}")
         except ExecutionAborted:
+            log_event(
+                self._audit_logger,
+                "executor.command.aborted",
+                level=logging.INFO,
+                command=command_display,
+                duration_ms=int((perf_counter() - run_started_perf) * 1000),
+            )
             raise
         except Exception as e:
             if not isinstance(e, CommandError):
+                log_event(
+                    self._audit_logger,
+                    "executor.command.error",
+                    level=logging.ERROR,
+                    command=command_display,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                )
                 self.ui.show_error(f"Erro do sistema ao rodar '{command}': {str(e)}")
                 raise CommandError(f"Erro no ambiente: {str(e)}")
+            if not error_logged:
+                log_event(
+                    self._audit_logger,
+                    "executor.command.error",
+                    level=logging.ERROR,
+                    command=command_display,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                )
             raise
         finally:
             if output_spool is not None:
