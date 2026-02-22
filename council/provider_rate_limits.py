@@ -107,6 +107,7 @@ def _probe_codex(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
 
 
 def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
+    cli_model = _probe_claude_model(timeout_seconds=timeout_seconds)
     candidates = ["/usage", "/cost"]
     last_attempt: _CommandAttemptResult | None = None
 
@@ -121,6 +122,7 @@ def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
                 summary=_entries_summary(entries),
                 entries=entries,
                 source=_format_command(attempt.command),
+                model=_extract_model_from_output(attempt.output) or cli_model,
             )
 
     return ProviderRateLimitProbeResult(
@@ -132,14 +134,26 @@ def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
         ),
         entries=(),
         source=_format_command(last_attempt.command) if last_attempt is not None else None,
+        model=cli_model,
     )
 
 
 def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
     about_attempt = _run_gemini_repl_command("/about", timeout_seconds=timeout_seconds)
-    about_model = _extract_model_from_output(about_attempt.output)
-    about_tier = _extract_tier_from_output(about_attempt.output)
-    about_entries = _parse_generic_entries(about_attempt.output)
+    about_output = about_attempt.output
+    about_model = _extract_model_from_output(about_output)
+    about_tier = _extract_tier_from_output(about_output)
+    if about_model is None or about_tier is None:
+        about_probe_attempt = _run_probe_command(
+            ["gemini", "-p", "/about", "--output-format", "text"],
+            timeout_seconds=timeout_seconds,
+        )
+        about_output = _join_outputs(about_output, about_probe_attempt.output)
+        if about_model is None:
+            about_model = _extract_model_from_output(about_output)
+        if about_tier is None:
+            about_tier = _extract_tier_from_output(about_output)
+    about_entries = _parse_generic_entries(about_output)
     if about_entries:
         return ProviderRateLimitProbeResult(
             binary="gemini",
@@ -182,6 +196,18 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
     )
 
 
+def _probe_claude_model(*, timeout_seconds: int) -> str | None:
+    for command in (
+        ["claude", "-p", "model"],
+        ["claude", "-p", "/model"],
+    ):
+        attempt = _run_probe_command(command, timeout_seconds=timeout_seconds)
+        model = _extract_model_from_output(attempt.output)
+        if model:
+            return model
+    return None
+
+
 def _run_gemini_repl_command(slash_command: str, *, timeout_seconds: int) -> _CommandAttemptResult:
     return _run_interactive_repl_command(
         binary="gemini",
@@ -201,8 +227,8 @@ def _run_claude_repl_command(slash_command: str, *, timeout_seconds: int) -> _Co
         timeout_seconds=timeout_seconds,
         ready_patterns=(r">\s*$", r"\$\s*$"),
         ready_timeout=20,
-        response_patterns=(r">\s*$", r"Resets"),
-        response_timeout=10,
+        response_patterns=(r">\s*$",),
+        response_timeout=15,
     )
 
 
@@ -217,7 +243,7 @@ def _run_interactive_repl_command(
     response_timeout: int,
 ) -> _CommandAttemptResult:
     child: pexpect.spawn | None = None
-    command = (binary, slash_command)
+    command = (binary,)
     try:
         child = pexpect.spawn(
             binary,
@@ -249,7 +275,7 @@ def _run_interactive_repl_command(
         if response_index == len(response_patterns):
             _terminate_repl_child(child)
             return _CommandAttemptResult(
-                command=command,
+                command=(*command, slash_command),
                 return_code=None,
                 output=output,
                 timed_out=True,
@@ -258,7 +284,7 @@ def _run_interactive_repl_command(
 
         _terminate_repl_child(child)
         return _CommandAttemptResult(
-            command=command,
+            command=(*command, slash_command),
             return_code=child.exitstatus if child.exitstatus is not None else 0,
             output=output,
             timed_out=False,
@@ -362,7 +388,10 @@ def _run_probe_command(command: list[str], *, timeout_seconds: int) -> _CommandA
 
 
 def _merge_outputs(attempt: _CommandAttemptResult, output_file_text: str) -> str:
-    parts = [output_file_text, attempt.output]
+    return _join_outputs(output_file_text, attempt.output)
+
+
+def _join_outputs(*parts: str) -> str:
     return _strip_ansi("\n".join(part for part in parts if part))
 
 
@@ -498,7 +527,23 @@ def _format_command(command: tuple[str, ...]) -> str:
 
 
 def _extract_model_from_output(raw_output: str) -> str | None:
-    return _extract_labeled_value(raw_output, "Model")
+    labeled_value = _extract_labeled_value(raw_output, "Model")
+    if labeled_value:
+        return _normalize_model_value(labeled_value)
+
+    for pattern in (
+        re.compile(r"(?im)\bmodel\s*id\b(?:\s*(?:is|=|:)\s*)?`?(?P<value>[a-z0-9._-]+)`?"),
+        re.compile(r"(?im)\bmodel\b\s*:\s*`?(?P<value>[a-z0-9._-]+)`?"),
+        re.compile(r"(?im)`(?P<value>(?:claude|gpt|gemini)-[a-z0-9._-]+)`"),
+    ):
+        match = pattern.search(raw_output)
+        if match is None:
+            continue
+        value = match.group("value").strip()
+        if value:
+            return _normalize_model_value(value)
+
+    return None
 
 
 def _extract_tier_from_output(raw_output: str) -> str | None:
@@ -518,6 +563,12 @@ def _extract_labeled_value(raw_output: str, label: str) -> str | None:
         if value:
             return value
     return None
+
+
+def _normalize_model_value(value: str) -> str:
+    normalized = value.strip()
+    normalized = re.sub(r"\s+/model\b.*$", "", normalized, flags=re.IGNORECASE).strip()
+    return normalized
 
 
 def _strip_ansi(text: str) -> str:
