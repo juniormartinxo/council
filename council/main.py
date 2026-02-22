@@ -53,6 +53,10 @@ from council.prerequisites import (
     find_missing_binaries,
     find_world_writable_binary_locations,
 )
+from council.provider_rate_limits import (
+    ProviderRateLimitProbeResult,
+    probe_provider_rate_limits,
+)
 from council.tui_state import TUIStateCryptoError, clear_tui_prompt_history, read_tui_state_passphrase
 
 app = typer.Typer(
@@ -63,6 +67,10 @@ history_app = typer.Typer(help="Gerencia histórico local da TUI.")
 flow_app = typer.Typer(help="Assinatura e verificação de integridade de flow.json.")
 app.add_typer(history_app, name="history")
 app.add_typer(flow_app, name="flow")
+
+_SUPPORTED_PROVIDER_LIMIT_BINARIES = {"codex", "claude", "gemini"}
+_PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS = 8
+
 
 @app.callback()
 def main():
@@ -250,22 +258,70 @@ def _extract_model_from_command(command: str) -> str:
 
 def _build_doctor_agents_model_table(
     flow_steps: list[FlowStep],
+    provider_rate_limits: dict[str, ProviderRateLimitProbeResult] | None = None,
 ) -> Table:
+    provider_rate_limits = provider_rate_limits or {}
     table = Table(title="Agentes e modelo", expand=False, header_style="bold")
     table.add_column("Passo", no_wrap=True)
     table.add_column("Agente")
     table.add_column("Binário", no_wrap=True)
     table.add_column("Modelo")
+    table.add_column("Cota (provedor)")
 
     for step in flow_steps:
+        binary = _extract_binary_from_command(step.command)
+        command_model = _extract_model_from_command(step.command)
         table.add_row(
             step.key,
             step.agent_name,
-            _extract_binary_from_command(step.command),
-            _extract_model_from_command(step.command),
+            binary,
+            _doctor_model_display(binary, command_model, provider_rate_limits),
+            _provider_rate_limit_summary(binary, provider_rate_limits),
         )
 
     return table
+
+
+def _doctor_model_display(
+    binary: str,
+    command_model: str,
+    provider_rate_limits: dict[str, ProviderRateLimitProbeResult],
+) -> str:
+    if command_model not in {"padrão da CLI", "não identificado"}:
+        return command_model
+    result = provider_rate_limits.get(binary)
+    if result is not None and result.model:
+        return f"{result.model} (CLI)"
+    return command_model
+
+
+def _provider_rate_limit_summary(
+    binary: str,
+    provider_rate_limits: dict[str, ProviderRateLimitProbeResult],
+) -> str:
+    result = provider_rate_limits.get(binary)
+    if result is not None:
+        if result.status == "unsupported":
+            return "n/a"
+        return result.summary
+    if binary == "codex":
+        return "indisponível automaticamente; use /status"
+    if binary == "claude":
+        return "indisponível automaticamente; use /usage"
+    if binary == "gemini":
+        return "indisponível automaticamente; use /stats"
+    return "n/a"
+
+
+def _resolve_provider_rate_limits(flow_steps: list[FlowStep]) -> dict[str, ProviderRateLimitProbeResult]:
+    binaries = {_extract_binary_from_command(step.command) for step in flow_steps}
+    probe_targets = sorted(binary for binary in binaries if binary in _SUPPORTED_PROVIDER_LIMIT_BINARIES)
+    if not probe_targets:
+        return {}
+    return probe_provider_rate_limits(
+        probe_targets,
+        timeout_seconds=_PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS,
+    )
 
 
 def _build_doctor_rate_limits_table(
@@ -516,6 +572,19 @@ def doctor(
     statuses = evaluate_flow_prerequisites(flow_steps)
     missing = find_missing_binaries(statuses)
     world_writable = find_world_writable_binary_locations(statuses)
+    provider_rate_limits: dict[str, ProviderRateLimitProbeResult]
+    try:
+        provider_rate_limits = _resolve_provider_rate_limits(flow_steps)
+    except Exception as exc:
+        provider_rate_limits = {}
+        log_event(
+            audit_logger,
+            "main.doctor.provider_limit_probe_failed",
+            level=logging.WARNING,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+
     flow_source_description = _describe_resolved_flow_source(resolved_config)
     console.print(
         Panel.fit(
@@ -524,7 +593,7 @@ def doctor(
             border_style="cyan",
         )
     )
-    console.print(_build_doctor_agents_model_table(flow_steps))
+    console.print(_build_doctor_agents_model_table(flow_steps, provider_rate_limits))
     console.print(_build_doctor_rate_limits_table(flow_steps, runtime_limit_defaults))
     if not statuses:
         log_event(
@@ -818,6 +887,48 @@ def flow_sign(
             f"{FLOW_SIGNATURE_REQUIRED_ENV_VAR}=1."
         )
     )
+
+
+@flow_app.command("edit")
+def flow_edit(
+    flow_config: Annotated[
+        Optional[str],
+        typer.Argument(
+            help=(
+                "Caminho para o flow.json a editar. "
+                "Se omitido ou não encontrado, inicia modelo default interno."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """
+    Inicia o editor visual de flow.json (TUI).
+    """
+    if flow_config is None:
+        try:
+            resolved_config = resolve_flow_config(None)
+            if resolved_config.source in (FLOW_CONFIG_SOURCE_DEFAULT, FLOW_CONFIG_SOURCE_ENV):
+                 flow_path = None # Força a interface a perguntar "Save As" no dir local
+            else:
+                 flow_path = resolved_config.path
+        except ConfigError:
+            flow_path = None
+    else:
+        flow_path = Path(flow_config).expanduser()
+        
+    try:
+        from council.flow_tui import FlowConfigApp
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            typer.echo(
+                "Dependência 'textual' não encontrada. "
+                "Instale com: pip install -r requirements.txt"
+            )
+            raise typer.Exit(code=1)
+        raise
+
+    app = FlowConfigApp(config_path=flow_path)
+    app.run()
 
 
 @flow_app.command("trust")
