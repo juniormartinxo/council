@@ -333,6 +333,68 @@ def test_doctor_reports_success_when_all_prerequisites_are_available(
     assert "Pré-requisitos atendidos." in result.stdout
 
 
+def test_doctor_displays_models_and_effective_limits_per_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(main_module.MAX_OUTPUT_CHARS_ENV_VAR, "250000")
+    monkeypatch.setenv(main_module.MAX_CONTEXT_CHARS_ENV_VAR, "90000")
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "load_flow_steps",
+        lambda *_args, **_kwargs: [
+            FlowStep(
+                key="implement",
+                agent_name="Codex",
+                role_desc="Implementação",
+                command="codex exec --model gpt-5-codex --skip-git-repo-check",
+                instruction="instruction",
+                max_input_chars=180000,
+                max_context_chars=60000,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="codex",
+                resolved_path="/usr/bin/codex",
+                is_available=True,
+                is_world_writable_location=False,
+            )
+        ],
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "Agentes e modelo" in result.stdout
+    assert "Rate limits efetivos" in result.stdout
+    assert "implement" in result.stdout
+    assert "Codex" in result.stdout
+    assert "180000 (passo)" in result.stdout
+    assert "250000 (env)" in result.stdout
+    assert "60000 (passo)" in result.stdout
+
+
+def test_extract_model_from_command_supports_long_and_short_flags() -> None:
+    assert (
+        main_module._extract_model_from_command(
+            "codex exec --model gpt-5-codex --skip-git-repo-check"
+        )
+        == "gpt-5-codex"
+    )
+    assert main_module._extract_model_from_command("gemini -m gemini-2.5-pro -p {input}") == "gemini-2.5-pro"
+    assert main_module._extract_model_from_command("claude -p") == "padrão da CLI"
+
+
 def test_doctor_emits_audit_logs_for_success(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[tuple[str, int, dict[str, object]]] = []
 
