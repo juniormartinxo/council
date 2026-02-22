@@ -1,4 +1,6 @@
 import sys
+import os
+import shlex
 import logging
 import typer
 from pathlib import Path
@@ -11,8 +13,14 @@ from rich.text import Text
 
 from council.audit_log import get_audit_logger, log_event
 from council.ui import UI
-from council.state import CouncilState
-from council.executor import Executor
+from council.state import CouncilState, DEFAULT_MAX_CONTEXT_CHARS, MAX_CONTEXT_CHARS_ENV_VAR
+from council.executor import (
+    Executor,
+    DEFAULT_MAX_INPUT_CHARS,
+    DEFAULT_MAX_OUTPUT_CHARS,
+    MAX_INPUT_CHARS_ENV_VAR,
+    MAX_OUTPUT_CHARS_ENV_VAR,
+)
 from council.orchestrator import Orchestrator
 from council.config import (
     ConfigError,
@@ -28,6 +36,7 @@ from council.config import (
     resolve_flow_config,
 )
 from council.history_store import HistoryStore
+from council.limits import read_positive_int_env
 from council.flow_signature import (
     FLOW_SIGNATURE_REQUIRED_ENV_VAR,
     FlowSignatureError,
@@ -158,6 +167,127 @@ def _build_doctor_status_table(statuses: list[BinaryPrerequisiteStatus]) -> Tabl
             status.binary,
             resolved_path,
             detail,
+        )
+
+    return table
+
+
+def _resolve_global_runtime_limit(env_var: str, default_value: int) -> tuple[int, str]:
+    configured_value = os.getenv(env_var, "").strip()
+    resolved_value = read_positive_int_env(env_var, default_value)
+    source = "env" if configured_value else "default"
+    return resolved_value, source
+
+
+def _resolve_runtime_limit_defaults() -> dict[str, tuple[int, str]]:
+    max_input_chars, input_source = _resolve_global_runtime_limit(
+        MAX_INPUT_CHARS_ENV_VAR,
+        DEFAULT_MAX_INPUT_CHARS,
+    )
+    max_output_chars, output_source = _resolve_global_runtime_limit(
+        MAX_OUTPUT_CHARS_ENV_VAR,
+        DEFAULT_MAX_OUTPUT_CHARS,
+    )
+    max_context_chars, context_source = _resolve_global_runtime_limit(
+        MAX_CONTEXT_CHARS_ENV_VAR,
+        DEFAULT_MAX_CONTEXT_CHARS,
+    )
+
+    return {
+        "max_input_chars": (max_input_chars, input_source),
+        "max_output_chars": (max_output_chars, output_source),
+        "max_context_chars": (max_context_chars, context_source),
+    }
+
+
+def _effective_limit_display(
+    step_limit: int | None,
+    global_limit_value: int,
+    global_limit_source: str,
+) -> str:
+    if step_limit is not None:
+        return f"{step_limit} (passo)"
+    return f"{global_limit_value} ({global_limit_source})"
+
+
+def _extract_binary_from_command(command: str) -> str:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return "(inválido)"
+    return tokens[0] if tokens else "(vazio)"
+
+
+def _extract_model_from_command(command: str) -> str:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return "não identificado"
+
+    if not tokens:
+        return "não identificado"
+
+    for index, token in enumerate(tokens):
+        if token == "--model" and index + 1 < len(tokens):
+            model = tokens[index + 1].strip()
+            if model:
+                return model
+        if token.startswith("--model="):
+            model = token.partition("=")[2].strip()
+            if model:
+                return model
+        if token == "-m" and index + 1 < len(tokens):
+            model = tokens[index + 1].strip()
+            if model:
+                return model
+        if token.startswith("-m="):
+            model = token.partition("=")[2].strip()
+            if model:
+                return model
+
+    return "padrão da CLI"
+
+
+def _build_doctor_agents_model_table(
+    flow_steps: list[FlowStep],
+) -> Table:
+    table = Table(title="Agentes e modelo", expand=False, header_style="bold")
+    table.add_column("Passo", no_wrap=True)
+    table.add_column("Agente")
+    table.add_column("Binário", no_wrap=True)
+    table.add_column("Modelo")
+
+    for step in flow_steps:
+        table.add_row(
+            step.key,
+            step.agent_name,
+            _extract_binary_from_command(step.command),
+            _extract_model_from_command(step.command),
+        )
+
+    return table
+
+
+def _build_doctor_rate_limits_table(
+    flow_steps: list[FlowStep],
+    runtime_limit_defaults: dict[str, tuple[int, str]],
+) -> Table:
+    table = Table(title="Rate limits efetivos", expand=False, header_style="bold")
+    table.add_column("Passo", no_wrap=True)
+    table.add_column("Input")
+    table.add_column("Output")
+    table.add_column("Contexto")
+
+    default_max_input, input_source = runtime_limit_defaults["max_input_chars"]
+    default_max_output, output_source = runtime_limit_defaults["max_output_chars"]
+    default_max_context, context_source = runtime_limit_defaults["max_context_chars"]
+
+    for step in flow_steps:
+        table.add_row(
+            step.key,
+            _effective_limit_display(step.max_input_chars, default_max_input, input_source),
+            _effective_limit_display(step.max_output_chars, default_max_output, output_source),
+            _effective_limit_display(step.max_context_chars, default_max_context, context_source),
         )
 
     return table
@@ -363,6 +493,26 @@ def doctor(
         raise typer.Exit(code=1)
 
     console = Console()
+    try:
+        runtime_limit_defaults = _resolve_runtime_limit_defaults()
+    except ValueError as exc:
+        log_event(
+            audit_logger,
+            "main.doctor.invalid_limits",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        console.print(
+            Panel(
+                f"Configuração inválida de limites: {exc}",
+                title="[bold red]Falha[/bold red]",
+                border_style="red",
+                expand=False,
+            )
+        )
+        raise typer.Exit(code=1)
+
     statuses = evaluate_flow_prerequisites(flow_steps)
     missing = find_missing_binaries(statuses)
     world_writable = find_world_writable_binary_locations(statuses)
@@ -374,6 +524,8 @@ def doctor(
             border_style="cyan",
         )
     )
+    console.print(_build_doctor_agents_model_table(flow_steps))
+    console.print(_build_doctor_rate_limits_table(flow_steps, runtime_limit_defaults))
     if not statuses:
         log_event(
             audit_logger,
