@@ -4,6 +4,21 @@ import pexpect
 import council.provider_rate_limits as provider_limits
 
 
+def _build_interactive_child(expect_steps: list[tuple[int, str]], *, exitstatus: int = 0) -> Mock:
+    child = Mock()
+    child.before = ""
+    child.exitstatus = exitstatus
+    steps = iter(expect_steps)
+
+    def _expect(_patterns, timeout=None):
+        index, before = next(steps)
+        child.before = before
+        return index
+
+    child.expect.side_effect = _expect
+    return child
+
+
 def test_parse_codex_entries_extracts_left_percentage_and_reset() -> None:
     output = """
 5h limit: [█████-----] 70% left (resets 14:56)
@@ -56,54 +71,99 @@ def test_extract_model_and_tier_from_output_supports_colon_and_table_formats() -
     )
 
 
-def test_probe_gemini_uses_about_as_fallback_for_model_and_tier(monkeypatch) -> None:
-    attempts = iter(
+def test_probe_gemini_uses_about_as_fallback_for_model_and_tier() -> None:
+    about_child = _build_interactive_child(
         [
-            provider_limits._CommandAttemptResult(
-                command=("gemini", "-p", "/about", "--output-format", "text"),
-                return_code=0,
-                output=(
+            (0, ""),
+            (
+                0,
+                (
                     "Model           Auto (Gemini 3)\n"
                     "Tier            Gemini Code Assist in Google One AI Pro\n"
                 ),
-                timed_out=False,
-                error=None,
             ),
-            provider_limits._CommandAttemptResult(
-                command=("gemini", "-p", "/stats", "--output-format", "text"),
-                return_code=0,
-                output="No quota information found",
-                timed_out=False,
-                error=None,
-            ),
-            provider_limits._CommandAttemptResult(
-                command=("gemini", "-p", "/usage", "--output-format", "text"),
-                return_code=0,
-                output="No quota information found",
-                timed_out=False,
-                error=None,
-            ),
-            provider_limits._CommandAttemptResult(
-                command=("gemini", "-p", "/status", "--output-format", "text"),
-                return_code=0,
-                output="No quota information found",
-                timed_out=False,
-                error=None,
-            ),
+            (0, ""),
+        ]
+    )
+    stats_child = _build_interactive_child(
+        [
+            (0, ""),
+            (0, "No quota information found"),
+            (0, ""),
         ]
     )
 
-    monkeypatch.setattr(
-        provider_limits,
-        "_run_probe_command",
-        lambda _command, timeout_seconds: next(attempts),
-    )
-
-    result = provider_limits._probe_gemini(timeout_seconds=1)
+    with patch("pexpect.spawn", side_effect=[about_child, stats_child]):
+        result = provider_limits._probe_gemini(timeout_seconds=30)
 
     assert result.status == "unavailable"
     assert result.model == "Auto (Gemini 3)"
     assert "tier Gemini Code Assist in Google One AI Pro" in result.summary
+
+
+def test_probe_claude_reads_usage_from_interactive_repl() -> None:
+    usage_child = _build_interactive_child(
+        [
+            (0, ""),
+            (
+                0,
+                (
+                    "Current session\n"
+                    "2% used\n"
+                    "Resets 7pm (America/Sao_Paulo)\n\n"
+                    "Current week (all models)\n"
+                    "29% used\n"
+                    "Resets Feb 26, 2pm (America/Sao_Paulo)\n"
+                ),
+            ),
+            (0, ""),
+        ]
+    )
+
+    with patch("pexpect.spawn", return_value=usage_child):
+        result = provider_limits._probe_claude(timeout_seconds=30)
+
+    assert result.status == "ok"
+    assert len(result.entries) == 2
+    assert result.entries[0].window == "current session"
+    assert result.entries[0].percent_type == "used"
+    assert result.entries[0].percent_value == 2
+    assert result.entries[1].window == "current week"
+    assert result.entries[1].percent_value == 29
+
+
+def test_probe_claude_falls_back_to_cost_when_usage_has_no_entries() -> None:
+    usage_child = _build_interactive_child(
+        [
+            (0, ""),
+            (0, "No quota information found"),
+            (0, ""),
+        ]
+    )
+    cost_child = _build_interactive_child(
+        [
+            (0, ""),
+            (
+                0,
+                (
+                    "Current session\n"
+                    "5% used\n"
+                    "Resets 9pm (America/Sao_Paulo)\n"
+                ),
+            ),
+            (0, ""),
+        ]
+    )
+
+    with patch("pexpect.spawn", side_effect=[usage_child, cost_child]) as spawn_mock:
+        result = provider_limits._probe_claude(timeout_seconds=30)
+
+    assert spawn_mock.call_count == 2
+    assert result.status == "ok"
+    assert len(result.entries) == 1
+    assert result.entries[0].window == "current session"
+    assert result.entries[0].percent_value == 5
+    assert result.source == "claude /cost"
 
 
 def test_run_probe_command_uses_pexpect_and_returns_output() -> None:
