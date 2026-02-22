@@ -67,21 +67,63 @@ class ResolvedFlowConfig:
 
 
 def get_default_flow_steps() -> list[FlowStep]:
+    plan_instruction = (
+        "Você é um arquiteto de software sênior, pragmático e orientado a entregas. "
+        "Analise o requisito abaixo e produza um plano de implementação estruturado contendo:\n\n"
+        "1. VISÃO GERAL — Resumo do que será feito e por quê.\n"
+        "2. ARQUITETURA — Componentes envolvidos, dependências e integrações.\n"
+        "3. PASSOS DE IMPLEMENTAÇÃO — Lista ordenada e detalhada das tarefas, "
+        "com arquivos a criar/modificar.\n"
+        "4. RISCOS E MITIGAÇÕES — Problemas potenciais e como evitá-los.\n"
+        "5. CRITÉRIOS DE SUCESSO — Como validar que a implementação está correta.\n\n"
+        "Seja específico com nomes de arquivos, funções e estruturas de dados. "
+        "Evite generalidades."
+    )
     critique_instruction = (
-        "Analise o seguinte plano de arquitetura. "
-        "Aponte falhas de arquitetura e possíveis problemas de segurança:"
+        "Você é um auditor técnico rigoroso e cético. "
+        "Sua função é encontrar falhas que o arquiteto não viu. "
+        "Analise o plano com foco em:\n\n"
+        "1. FALHAS DE ARQUITETURA — Acoplamento excessivo, violações de SOLID, escalabilidade.\n"
+        "2. SEGURANÇA — Injeção, exposição de dados, permissões inadequadas, supply chain.\n"
+        "3. EDGE CASES — Cenários não cobertos, condições de corrida, falhas de rede/IO.\n"
+        "4. COMPLEXIDADE DESNECESSÁRIA — Onde o plano poderia ser simplificado sem perder qualidade.\n"
+        "5. DEPENDÊNCIAS E RISCOS — Bibliotecas desatualizadas, lock-in, compatibilidade.\n\n"
+        "Para cada problema encontrado, classifique a severidade como "
+        "[CRÍTICO], [ALTO], [MÉDIO] ou [BAIXO] e sugira uma correção concreta. "
+        "Não elogie o que está bom — foque apenas nos problemas."
     )
     consolidation_instruction = (
-        "O plano inicial recebeu as seguintes críticas. "
-        "Consolide, resolva os problemas e gere o plano final corrigido:"
+        "Você é o arquiteto decisor final deste projeto. "
+        "Você recebeu um plano inicial e críticas de um auditor técnico. Sua tarefa:\n\n"
+        "1. Analise cada crítica objetivamente.\n"
+        "2. ACEITE as críticas que são válidas e ajuste o plano de implementação de acordo.\n"
+        "3. REJEITE as críticas que considerar improcedentes, justificando brevemente por quê.\n"
+        "4. Produza o PLANO FINAL CONSOLIDADO — este será o documento que "
+        "o implementador seguirá ao pé da letra.\n\n"
+        "Formato da saída:\n"
+        "- DECISÕES SOBRE CRÍTICAS — Lista de críticas aceitas/rejeitadas com justificativa.\n"
+        "- PLANO FINAL — O plano completo e atualizado, pronto para implementação, "
+        "com os mesmos 5 pontos do plano original "
+        "(Visão Geral, Arquitetura, Passos, Riscos, Critérios)."
     )
     implementation_instruction = (
-        "Você é um engenheiro de software sênior. Implemente o código conforme o seguinte plano. "
-        "RETORNE APENAS O CÓDIGO FONTE FINAL E MAIS NADA, sem explicações em texto."
+        "Você é um engenheiro de software sênior focado em implementação limpa e produtiva. "
+        "Implemente EXATAMENTE o que o plano consolidado especifica. Regras:\n\n"
+        "- Retorne APENAS código-fonte. Sem explicações, sem comentários desnecessários.\n"
+        "- Siga as convenções do projeto existente (linguagem, estilo, estrutura de diretórios).\n"
+        "- Inclua tratamento de erros e validação de entrada onde aplicável.\n"
+        "- Se o plano especificar testes, implemente-os também."
     )
     review_instruction = (
-        "Você é um revisor de código rigoroso. Faça um code review detalhado do código a seguir, "
-        "apontando boas práticas, bugs ocultos, problemas de segurança ou pontos de melhoria:"
+        "Você é um revisor de código especializado em segurança e robustez. "
+        "Compare o código implementado com o plano consolidado e avalie:\n\n"
+        "1. CONFORMIDADE — O código implementa fielmente o que o plano especifica?\n"
+        "2. SEGURANÇA — Há vulnerabilidades "
+        "(injeção, XSS, SSRF, path traversal, secrets expostos)?\n"
+        "3. BUGS — Erros lógicos, off-by-one, null references, condições de corrida?\n"
+        "4. TESTES — A cobertura de testes é adequada? Faltam casos de borda?\n\n"
+        "Classifique cada achado como [CRÍTICO], [ALTO], [MÉDIO] ou [BAIXO]. "
+        "Seja direto e objetivo."
     )
 
     return [
@@ -90,7 +132,7 @@ def get_default_flow_steps() -> list[FlowStep]:
             agent_name="Claude",
             role_desc="Planejamento",
             command="claude -p",
-            instruction="Você é um arquiteto de software. Crie um plano detalhado para o seguinte requisito:",
+            instruction=plan_instruction,
             input_template="{instruction}\n\nCONTEXTO:\n{full_context}",
             style="dark_goldenrod",
         ),
@@ -110,7 +152,8 @@ def get_default_flow_steps() -> list[FlowStep]:
             command="claude -p",
             instruction=consolidation_instruction,
             input_template=(
-                "PLANO INICIAL:\n{plan}\n\nCRÍTICAS RECEBIDAS:\n{critique}\n\n{instruction}"
+                "{instruction}\n\nPLANO INICIAL:\n{plan}\n\n"
+                "CRÍTICAS RECEBIDAS:\n{critique}"
             ),
             style="dark_goldenrod",
         ),
@@ -130,7 +173,7 @@ def get_default_flow_steps() -> list[FlowStep]:
             role_desc="Revisão Final",
             command="gemini -p {input}",
             instruction=review_instruction,
-            input_template="{instruction}\n\nCÓDIGO:\n{code}",
+            input_template="{instruction}\n\nPLANO CONSOLIDADO:\n{final_plan}\n\nCÓDIGO:\n{code}",
             style="dodger_blue1",
         ),
     ]
