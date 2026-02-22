@@ -1,5 +1,6 @@
-import subprocess
+from unittest.mock import Mock, patch
 
+import pexpect
 import council.provider_rate_limits as provider_limits
 
 
@@ -105,19 +106,68 @@ def test_probe_gemini_uses_about_as_fallback_for_model_and_tier(monkeypatch) -> 
     assert "tier Gemini Code Assist in Google One AI Pro" in result.summary
 
 
-def test_run_probe_command_handles_timeout_with_bytes_streams(monkeypatch) -> None:
-    def fake_run(*_args, **_kwargs):
-        raise subprocess.TimeoutExpired(
-            cmd=["codex", "exec", "/status"],
-            timeout=1,
-            output=b"partial stdout",
-            stderr=b"partial stderr",
-        )
+def test_run_probe_command_uses_pexpect_and_returns_output() -> None:
+    child = Mock()
+    child.before = "prefix "
+    child.read.return_value = "\x1b[32mok\x1b[0m"
+    child.exitstatus = 0
 
-    monkeypatch.setattr(provider_limits.subprocess, "run", fake_run)
+    with patch("pexpect.spawn", return_value=child) as spawn_mock:
+        result = provider_limits._run_probe_command(["codex", "exec", "/status"], timeout_seconds=2)
 
-    result = provider_limits._run_probe_command(["codex", "exec", "/status"], timeout_seconds=1)
+    spawn_mock.assert_called_once_with(
+        "codex",
+        args=["exec", "/status"],
+        timeout=2,
+        encoding="utf-8",
+    )
+    child.expect.assert_called_once_with(pexpect.EOF)
+    child.read.assert_called_once()
+    child.close.assert_called_once_with()
+    assert result.return_code == 0
+    assert result.timed_out is False
+    assert result.error is None
+    assert result.output == "prefix ok"
 
+
+def test_run_probe_command_handles_timeout() -> None:
+    child = Mock()
+    child.before = "partial \x1b[31moutput\x1b[0m"
+    child.expect.side_effect = pexpect.TIMEOUT("timed out")
+
+    with patch("pexpect.spawn", return_value=child):
+        result = provider_limits._run_probe_command(["codex", "exec", "/status"], timeout_seconds=1)
+
+    child.close.assert_called_once_with(force=True)
+    assert result.return_code is None
     assert result.timed_out is True
-    assert "partial stdout" in result.output
-    assert "partial stderr" in result.output
+    assert result.error == "timeout"
+    assert result.output == "partial output"
+
+
+def test_run_probe_command_handles_missing_binary() -> None:
+    with patch(
+        "pexpect.spawn",
+        side_effect=pexpect.exceptions.ExceptionPexpect("The command was not found or was not executable: codex."),
+    ):
+        result = provider_limits._run_probe_command(["codex", "exec", "/status"], timeout_seconds=1)
+
+    assert result.return_code is None
+    assert result.timed_out is False
+    assert "not found" in (result.error or "").lower()
+    assert result.output == ""
+
+
+def test_run_probe_command_preserves_nonzero_exit_code() -> None:
+    child = Mock()
+    child.before = ""
+    child.read.return_value = "invalid request"
+    child.exitstatus = 2
+
+    with patch("pexpect.spawn", return_value=child):
+        result = provider_limits._run_probe_command(["gemini", "-p", "/status"], timeout_seconds=2)
+
+    assert result.return_code == 2
+    assert result.timed_out is False
+    assert result.error is None
+    assert result.output == "invalid request"
