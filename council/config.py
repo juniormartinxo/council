@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any, Literal, Mapping
 
 from council.paths import get_user_flow_config_path
+from council.flow_signature import (
+    FlowSignatureError,
+    parse_signature_required_from_env,
+    verify_flow_signature,
+)
 
 
 FLOW_CONFIG_ENV_VAR = "COUNCIL_FLOW_CONFIG"
@@ -141,9 +146,26 @@ def load_flow_steps(
         return get_default_flow_steps()
 
     try:
-        serialized_payload = resolved_path.read_text(encoding="utf-8")
+        serialized_payload_bytes = resolved_path.read_bytes()
     except OSError as exc:
         raise ConfigError(f"Falha ao ler configuração de fluxo em '{resolved_path}': {exc}") from exc
+
+    try:
+        require_signature = parse_signature_required_from_env()
+        verify_flow_signature(
+            resolved_path,
+            require_signature=require_signature,
+            flow_content=serialized_payload_bytes,
+        )
+    except FlowSignatureError as exc:
+        raise ConfigError(f"Falha na verificação de assinatura em '{resolved_path}': {exc}") from exc
+
+    try:
+        serialized_payload = serialized_payload_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ConfigError(
+            f"Conteúdo inválido em '{resolved_path}': esperado JSON em UTF-8."
+        ) from exc
 
     try:
         payload = json.loads(serialized_payload)
