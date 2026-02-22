@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 import council.main as main_module
 from council.config import (
@@ -12,6 +14,8 @@ from council.config import (
     FLOW_CONFIG_SOURCE_USER,
     ResolvedFlowConfig,
 )
+from council.history_store import HistoryStore
+from council.paths import COUNCIL_HOME_ENV_VAR
 
 
 class _DummyUI:
@@ -20,6 +24,10 @@ class _DummyUI:
 
     def show_error(self, message: str) -> None:
         self.errors.append(message)
+
+
+def _state_file(tmp_path: Path) -> Path:
+    return tmp_path / ".council-home" / "tui_state.json"
 
 
 def test_requires_implicit_flow_confirmation_for_cwd_and_env() -> None:
@@ -84,3 +92,109 @@ def test_run_exits_when_runtime_limits_config_is_invalid(monkeypatch) -> None:
     assert exc_info.value.exit_code == 1
     assert len(ui.errors) == 1
     assert "Configuração inválida de limites" in ui.errors[0]
+
+
+def test_history_clear_reports_when_state_file_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(tmp_path / ".council-home"))
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["history", "clear"])
+
+    assert result.exit_code == 0
+    assert "Nenhum histórico encontrado" in result.stdout
+
+
+def test_history_clear_removes_sensitive_prompt_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_file = _state_file(tmp_path)
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps(
+            {
+                "last_prompt": "segredo",
+                "prompt_history": ["segredo", "outro segredo"],
+                "last_flow_config": "flow.example.json",
+                "encrypted_prompt_state": {"version": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(state_file.parent))
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["history", "clear"])
+
+    assert result.exit_code == 0
+    assert "Histórico de prompts removido" in result.stdout
+
+    persisted = json.loads(state_file.read_text(encoding="utf-8"))
+    assert persisted["last_prompt"] == ""
+    assert persisted["prompt_history"] == []
+    assert persisted["last_flow_config"] == "flow.example.json"
+    assert "encrypted_prompt_state" not in persisted
+
+
+def test_history_runs_reports_empty_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(tmp_path / ".council-home"))
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["history", "runs"])
+
+    assert result.exit_code == 0
+    assert "Nenhum run persistido" in result.stdout
+
+
+def test_history_runs_lists_persisted_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    council_home = tmp_path / ".council-home"
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(council_home))
+    history_store = HistoryStore()
+    run_id = history_store.start_run(
+        prompt="prompt",
+        flow_config_path="flow.example.json",
+        flow_config_source="cli",
+        planned_steps=1,
+    )
+    history_store.finish_run(
+        run_id=run_id,
+        status="success",
+        error_message=None,
+        executed_steps=1,
+        successful_steps=1,
+        duration_ms=123,
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["history", "runs", "--limit", "5"])
+
+    assert result.exit_code == 0
+    assert f"run={run_id}" in result.stdout
+    assert "status=success" in result.stdout
+
+
+def test_history_clear_forwards_resolved_passphrase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(tmp_path / ".council-home"))
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(main_module, "read_tui_state_passphrase", lambda: "senha-vinda-do-ambiente")
+
+    def fake_clear(path: Path, passphrase: str | None = None) -> bool:
+        captured["path"] = path
+        captured["passphrase"] = passphrase
+        return False
+
+    monkeypatch.setattr(main_module, "clear_tui_prompt_history", fake_clear)
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["history", "clear"])
+
+    assert result.exit_code == 0
+    assert captured["passphrase"] == "senha-vinda-do-ambiente"
