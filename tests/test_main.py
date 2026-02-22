@@ -19,6 +19,7 @@ from council.config import (
 from council.flow_signature import FlowSignatureError
 from council.history_store import HistoryStore
 from council.paths import COUNCIL_HOME_ENV_VAR
+from council.provider_rate_limits import ProviderRateLimitProbeResult
 
 
 class _DummyUI:
@@ -41,6 +42,11 @@ def _sample_step(command: str = "claude -p") -> FlowStep:
         command=command,
         instruction="instruction",
     )
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_rate_limits_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main_module, "_resolve_provider_rate_limits", lambda _steps: {})
 
 
 def test_requires_implicit_flow_confirmation_for_cwd_and_env() -> None:
@@ -370,6 +376,20 @@ def test_doctor_displays_models_and_effective_limits_per_agent(
             )
         ],
     )
+    monkeypatch.setattr(
+        main_module,
+        "_resolve_provider_rate_limits",
+        lambda _steps: {
+            "codex": ProviderRateLimitProbeResult(
+                binary="codex",
+                status="ok",
+                summary="5h: 70% left; weekly: 27% left",
+                entries=(),
+                source="codex exec /status",
+                model="gpt-5.3-codex",
+            )
+        },
+    )
     runner = CliRunner()
 
     result = runner.invoke(main_module.app, ["doctor"])
@@ -377,11 +397,13 @@ def test_doctor_displays_models_and_effective_limits_per_agent(
     assert result.exit_code == 0
     assert "Agentes e modelo" in result.stdout
     assert "Rate limits efetivos" in result.stdout
+    assert "Cota (provedor)" in result.stdout
     assert "implement" in result.stdout
     assert "Codex" in result.stdout
     assert "180000 (passo)" in result.stdout
     assert "250000 (env)" in result.stdout
     assert "60000 (passo)" in result.stdout
+    assert "5h: 70% left; weekly: 27% left" in result.stdout
 
 
 def test_extract_model_from_command_supports_long_and_short_flags() -> None:
@@ -393,6 +415,64 @@ def test_extract_model_from_command_supports_long_and_short_flags() -> None:
     )
     assert main_module._extract_model_from_command("gemini -m gemini-2.5-pro -p {input}") == "gemini-2.5-pro"
     assert main_module._extract_model_from_command("claude -p") == "padrão da CLI"
+
+
+def test_doctor_uses_provider_model_when_command_uses_default_cli_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "resolve_flow_config",
+        lambda _: ResolvedFlowConfig(path=None, source=FLOW_CONFIG_SOURCE_DEFAULT),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "load_flow_steps",
+        lambda *_args, **_kwargs: [
+            FlowStep(
+                key="review",
+                agent_name="Gemini",
+                role_desc="Revisão",
+                command="gemini -p {input}",
+                instruction="instruction",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "evaluate_flow_prerequisites",
+        lambda _steps: [
+            main_module.BinaryPrerequisiteStatus(
+                binary="gemini",
+                resolved_path="/usr/bin/gemini",
+                is_available=True,
+                is_world_writable_location=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_resolve_provider_rate_limits",
+        lambda _steps: {
+            "gemini": ProviderRateLimitProbeResult(
+                binary="gemini",
+                status="unavailable",
+                summary="sem indicador de cota restante via CLI; use /stats",
+                entries=(),
+                source="gemini -p /about",
+                model="Auto (Gemini 3)",
+            )
+        },
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "Gemini" in result.stdout
+    assert "Auto (Gemini 3) (CLI)" in result.stdout
+    assert "sem indicador de cota" in result.stdout
+    assert "/stats" in result.stdout
 
 
 def test_doctor_emits_audit_logs_for_success(monkeypatch: pytest.MonkeyPatch) -> None:
