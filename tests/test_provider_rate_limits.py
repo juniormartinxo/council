@@ -242,6 +242,28 @@ def test_probe_claude_falls_back_to_cost_when_usage_has_no_entries() -> None:
     assert result.source == "claude /cost"
 
 
+def test_probe_claude_does_not_try_cost_after_usage_timeout() -> None:
+    model_child = Mock()
+    model_child.before = "Current model ID: `claude-opus-4-6`"
+    model_child.exitstatus = 0
+    timeout_usage_child = _build_interactive_child(
+        [
+            (0, ""),
+            (1, "No prompt return"),
+            (0, ""),
+        ]
+    )
+
+    with patch("pexpect.spawn", side_effect=[model_child, timeout_usage_child]) as spawn_mock:
+        result = provider_limits._probe_claude(timeout_seconds=30)
+
+    assert spawn_mock.call_count == 2
+    assert result.status == "unavailable"
+    assert result.model == "claude-opus-4-6"
+    assert "bunx ccusage" in result.summary
+    assert "(timeout)" in result.summary
+
+
 def test_run_probe_command_uses_pexpect_and_returns_output() -> None:
     child = Mock()
     child.before = "prefix \x1b[32mok\x1b[0m"
