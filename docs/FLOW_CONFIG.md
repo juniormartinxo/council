@@ -100,10 +100,17 @@ Alias suportados:
 Você pode usar:
 
 - `{user_prompt}`: prompt original do usuário.
-- `{full_context}`: histórico completo acumulado.
-- `{last_output}`: saída do passo imediatamente anterior.
+- `{full_context}`: histórico completo acumulado (encapsulado automaticamente em bloco delimitado de dados não confiáveis).
+- `{last_output}`: saída do passo imediatamente anterior (encapsulada automaticamente em bloco delimitado de dados não confiáveis).
 - `{instruction}`: conteúdo do próprio campo `instruction`.
-- `{<key_de_passo_anterior>}`: saída de qualquer passo anterior (ex.: `{plan}`, `{code}`).
+- `{<key_de_passo_anterior>}`: saída de qualquer passo anterior (ex.: `{plan}`, `{code}`), também encapsulada automaticamente em bloco delimitado.
+
+Por padrão, o Council envolve saídas de agentes nos placeholders acima com delimitadores:
+
+- `===DADOS_DO_AGENTE_ANTERIOR===`
+- `===FIM_DADOS_DO_AGENTE_ANTERIOR===`
+
+Esse encapsulamento reduz risco de prompt injection indireto entre etapas ao separar instrução do passo de dados vindos de LLMs anteriores.
 
 ## 5.1 Placeholder no `command` e Autocompletar Gemini
 
@@ -116,6 +123,10 @@ Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o plac
 ```
 
 Quando `{input}` está presente, o Council injeta o prompt já escapado no próprio comando e não envia conteúdo via `stdin` para esse passo.
+Nessa rota, o payload é delimitado automaticamente com:
+
+- `===COUNCIL_INPUT_ARGV_START===`
+- `===COUNCIL_INPUT_ARGV_END===`
 
 **Especial para Gemini**: Como conveniência extra, se você configurar o comando estritamente como `gemini -p` ou `gemini --prompt` (sem indicar o valor e sem usar explicitamente o placeholder `{input}`), o executor irá detectar esse padrão automaticamente. Ele tratará a sintaxe anexando o payload escapado no final do comando de forma invisível.
 
