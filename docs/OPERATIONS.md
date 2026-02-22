@@ -99,6 +99,18 @@ Persistência estruturada do pipeline:
 - Banco em `COUNCIL_HOME/db/history.sqlite3`.
 - Tabelas principais: `runs` (metadados da execução) e `run_steps` (passos executados com input/output e duração).
 
+Logging de auditoria:
+- Arquivo em `COUNCIL_HOME/council.log` com eventos estruturados (JSON por linha).
+- Campos padrão: `timestamp_utc`, `level`, `event`, `data`.
+- Nível mínimo configurável via `COUNCIL_LOG_LEVEL` (default: `INFO`).
+- Permissões endurecidas: `COUNCIL_HOME` em `0o700` e `council.log` em `0o600` quando suportado.
+
+Inspeção rápida dos últimos eventos:
+
+```bash
+tail -n 50 "${COUNCIL_HOME:-$HOME/.config/council}/council.log"
+```
+
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
 
