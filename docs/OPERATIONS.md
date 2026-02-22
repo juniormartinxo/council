@@ -52,12 +52,43 @@ No modo TUI, os comportamentos atuais são:
 - **Checkpoint humano por etapa:** após cada agente, escolha `Continuar`, `Enviar ajuste` (reexecuta o mesmo step com feedback) ou `Abortar`.
 - **Abas por step em dois painéis:** tanto em `Stream em tempo real` quanto em `Resultados por etapa`, com aba agregada `Geral`.
 - **Cópia contextual por aba ativa:** `Ctrl+1` copia o conteúdo da aba ativa no painel de stream; `Ctrl+2` copia a aba ativa do painel de resultados.
-- **Fallback de clipboard:** se o terminal não permitir copiar para o clipboard do SO, a TUI salva em `/tmp/council_<stream|resultados>_<timestamp>.txt` e informa o caminho.
-- **Persistência local de sessão:** o arquivo `tui_state.json` em `~/.config/council/` (ou equivalente do SO) guarda o `flow_config` usado por último e o histórico de prompts.
+- **Fallback de clipboard:** se o terminal não permitir copiar para o clipboard do SO, a TUI salva em `COUNCIL_HOME/clipboard/council_<stream|resultados>_<timestamp>.txt` e informa o caminho.
+- **Persistência local de sessão:** o arquivo `tui_state.json` em `COUNCIL_HOME` guarda `last_flow_config` e histórico de prompts.
 - **Histórico de prompt com navegação:** use setas `↑/↓` no input para recuperar prompts anteriores.
 - **Comportamento de abertura:** campo de prompt inicia vazio; campo de flow reabre com o último valor salvo.
 - **Abortar a qualquer momento:** use botão `Abortar` ou `Ctrl+X`; o subprocesso em execução é cancelado de forma ativa.
 - **Fechar a aplicação:** `Ctrl+Q`.
+
+Limpeza explícita do histórico sensível:
+
+```bash
+council history clear
+```
+
+Inspeção rápida de runs persistidos no SQLite local:
+
+```bash
+council history runs --limit 20
+```
+
+Criptografia at-rest opcional do histórico de prompts:
+
+```bash
+pip install -e ".[security]"
+export COUNCIL_TUI_STATE_PASSPHRASE="sua-senha-forte"
+```
+
+Alternativa para reduzir exposição da senha em variáveis de ambiente:
+
+```bash
+printf '%s' 'sua-senha-forte' > ~/.config/council/passphrase.txt
+chmod 600 ~/.config/council/passphrase.txt
+export COUNCIL_TUI_STATE_PASSPHRASE_FILE=~/.config/council/passphrase.txt
+```
+
+Persistência estruturada do pipeline:
+- Banco em `COUNCIL_HOME/db/history.sqlite3`.
+- Tabelas principais: `runs` (metadados da execução) e `run_steps` (passos executados com input/output e duração).
 
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
