@@ -22,6 +22,9 @@ council = "council.main:cli"
 dev = [
   "pytest>=8.0.0",
 ]
+security = [
+  "cryptography>=42.0.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["council*"]
