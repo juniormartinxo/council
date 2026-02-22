@@ -288,14 +288,18 @@ Recomendações que não são vulnerabilidades diretas, mas fortalecem a postura
 - Eventos de auditoria adicionados para:
   - início/fim de fluxo e passos da orquestração;
   - execução de comandos no executor (início, sucesso, falha, timeout e aborto);
-  - falhas de pré-validação em CLI/TUI (configuração inválida e pré-requisitos ausentes).
+  - falhas de pré-validação em CLI/TUI (configuração inválida e pré-requisitos ausentes);
+  - execução do comando `council doctor` (invocação, warnings e resultado final).
 - O log inclui `timestamp_utc`, `level` (`DEBUG`/`INFO`/`ERROR` etc), `event` e `data`.
-- Nível mínimo configurável por `COUNCIL_LOG_LEVEL`.
+- Nível mínimo configurável por `COUNCIL_LOG_LEVEL` com validação fail-fast para valores inválidos.
+- Rotação de log por tamanho habilitada (`COUNCIL_LOG_MAX_BYTES`, `COUNCIL_LOG_BACKUP_COUNT`) para reduzir risco de crescimento indefinido.
 - Permissões endurecidas em disco local: diretório `COUNCIL_HOME` (`0o700`) e arquivo `council.log` (`0o600`) quando suportado pelo host.
+- Endurecimento aplicado também por escrita no handler de log (reatribuição defensiva de permissões `0o600`), reduzindo drift de permissões ao longo do runtime.
 
 **Risco residual:**
 - O log ainda depende da segurança do host local e das políticas de backup.
 - O nível `DEBUG` pode aumentar exposição de metadados operacionais; manter `INFO` em ambientes sensíveis.
+- Em ambientes com altíssima taxa de eventos, limites de rotação mal configurados ainda podem pressionar disco (risco operacional de configuração).
 
 **Evidência:**
 - Código: `council/audit_log.py`, `council/executor.py`, `council/orchestrator.py`, `council/main.py`, `council/tui.py`
