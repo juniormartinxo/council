@@ -90,8 +90,8 @@ class Executor:
         process: subprocess.Popen | None = None
         output_spool: TextIO | None = None
         try:
-            if self._cancel_event.is_set():
-                raise ExecutionAborted("Execução abortada pelo usuário.")
+            # Executor instances can be reused; avoid stale cancel state from previous runs.
+            self._cancel_event.clear()
 
             if timeout <= 0:
                 self.ui.show_error("Timeout inválido: informe um inteiro positivo.")
