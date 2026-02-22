@@ -197,7 +197,7 @@ def _run_probe_command(command: list[str], *, timeout_seconds: int) -> _CommandA
             encoding="utf-8",
         )
         child.expect(pexpect.EOF)
-        output = f"{child.before or ''}{child.read() or ''}"
+        output = child.before or ""
         child.close()
         return _CommandAttemptResult(
             command=tuple(command),
