@@ -102,7 +102,10 @@ Persistência estruturada do pipeline:
 Logging de auditoria:
 - Arquivo em `COUNCIL_HOME/council.log` com eventos estruturados (JSON por linha).
 - Campos padrão: `timestamp_utc`, `level`, `event`, `data`.
-- Nível mínimo configurável via `COUNCIL_LOG_LEVEL` (default: `INFO`).
+- Nível mínimo configurável via `COUNCIL_LOG_LEVEL` (default: `INFO`). Valores inválidos agora falham explicitamente (fail-fast).
+- Rotação local por tamanho configurável:
+  - `COUNCIL_LOG_MAX_BYTES` (default: `5242880`, 5 MiB por arquivo)
+  - `COUNCIL_LOG_BACKUP_COUNT` (default: `5`, quantidade de arquivos `.1`, `.2`, ...)
 - Permissões endurecidas: `COUNCIL_HOME` em `0o700` e `council.log` em `0o600` quando suportado.
 
 Inspeção rápida dos últimos eventos:
