@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -265,6 +266,21 @@ class FlowConfigApp(App[None]):
         width: 1fr;
     }
 
+    #limits-grid {
+        layout: horizontal;
+        width: 100%;
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .limits-col {
+        width: 1fr;
+    }
+
+    .limits-col-left {
+        margin-right: 1;
+    }
+
     .hidden {
         display: none;
     }
@@ -283,6 +299,7 @@ class FlowConfigApp(App[None]):
         self.current_step_index: int | None = None
         self.is_new_file = False
         self._is_populating_form = False
+        self._suppress_step_events = 0
 
     def on_mount(self) -> None:
         self.title = "Council Flow Editor"
@@ -304,13 +321,10 @@ class FlowConfigApp(App[None]):
             self.is_new_file = True
 
         self._refresh_list()
-        
+
         # Seleciona o primeiro passo automaticamente se existir
-        list_view = self.query_one("#step-list", ListView)
-        if self.steps and len(list_view.children) > 0:
-            list_view.index = 0
-            self.current_step_index = 0
-            self._populate_form(self.steps[0])
+        if self.steps:
+            self._set_selected_step(0, sync_list=True)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -357,9 +371,24 @@ class FlowConfigApp(App[None]):
                                 yield Label("Opções")
                                 yield Checkbox("É resultado de código? (is_code)", id="cb-is-code")
 
-                            with Vertical(classes="form-group"):
-                                yield Label("Max Input Chars")
-                                yield Input(id="in-max-input", placeholder="Vazio = Padrão")
+                            with Horizontal(id="limits-grid"):
+                                with Vertical(classes="limits-col limits-col-left"):
+                                    with Vertical(classes="form-group"):
+                                        yield Label("Timeout (segundos)")
+                                        yield Input(id="in-timeout", placeholder="120")
+
+                                    with Vertical(classes="form-group"):
+                                        yield Label("Max Input Chars")
+                                        yield Input(id="in-max-input", placeholder="Vazio = Padrão")
+
+                                with Vertical(classes="limits-col"):
+                                    with Vertical(classes="form-group"):
+                                        yield Label("Max Output Chars")
+                                        yield Input(id="in-max-output", placeholder="Vazio = Padrão")
+
+                                    with Vertical(classes="form-group"):
+                                        yield Label("Max Context Chars (Histórico)")
+                                        yield Input(id="in-max-context", placeholder="Vazio = Padrão")
 
                         with Vertical(id="form-right"):
                             with Vertical(classes="form-group"):
@@ -379,35 +408,79 @@ class FlowConfigApp(App[None]):
                                 )
 
                             with Vertical(classes="form-group"):
-                                yield Label("Timeout (segundos)")
-                                yield Input(id="in-timeout", placeholder="120")
-
-                            with Vertical(classes="form-group"):
                                 yield Label("Template de Input (input_template)")
                                 yield TextArea(id="ta-input-template")
 
-                            with Vertical(classes="form-group"):
-                                yield Label("Max Output Chars")
-                                yield Input(id="in-max-output", placeholder="Vazio = Padrão")
-                            
-                            with Vertical(classes="form-group"):
-                                yield Label("Max Context Chars (Histórico)")
-                                yield Input(id="in-max-context", placeholder="Vazio = Padrão")
-
         yield Footer()
+
+    @contextmanager
+    def _suspend_step_events_context(self):
+        self._suppress_step_events += 1
+        try:
+            yield
+        finally:
+            self._suppress_step_events -= 1
+
+    def _sync_step_list_metadata(self) -> None:
+        list_view = self.query_one("#step-list", ListView)
+        for index, raw_item in enumerate(list_view.children):
+            item = cast(StepListItem, raw_item)
+            item.step_index = index
+            if index < len(self.steps):
+                item.step = self.steps[index]
+            item.update_label()
+
+    def _set_selected_step(
+        self,
+        index: int | None,
+        *,
+        save_current: bool = False,
+        sync_list: bool = False,
+        force_populate: bool = False,
+    ) -> None:
+        if index is None or not self.steps:
+            self.current_step_index = None
+            if sync_list:
+                list_view = self.query_one("#step-list", ListView)
+                with self._suspend_step_events_context():
+                    list_view.index = None
+            self.query_one("#step-form").add_class("hidden")
+            self.query_one("#empty-state").remove_class("hidden")
+            return
+
+        normalized_index = max(0, min(index, len(self.steps) - 1))
+        previous_index = self.current_step_index
+
+        if (
+            save_current
+            and previous_index is not None
+            and previous_index != normalized_index
+        ):
+            self._save_form_to_step(previous_index)
+
+        if sync_list:
+            list_view = self.query_one("#step-list", ListView)
+            with self._suspend_step_events_context():
+                list_view.index = normalized_index
+
+        if previous_index == normalized_index and not force_populate:
+            return
+
+        self.current_step_index = normalized_index
+        self._populate_form(self.steps[normalized_index])
 
     def _refresh_list(self) -> None:
         list_view = self.query_one("#step-list", ListView)
-        current_index = list_view.index
-        list_view.clear()
-        
-        for i, step in enumerate(self.steps):
-            list_view.append(StepListItem(step, i))
-            
-        if current_index is not None and self.steps:
-            # Mantém a seleção na posição anterior, limitando ao novo tamanho
-            new_index = min(current_index, len(self.steps) - 1)
-            list_view.index = new_index
+        selected_index = self.current_step_index
+
+        with self._suspend_step_events_context():
+            list_view.clear()
+            for i, step in enumerate(self.steps):
+                list_view.append(StepListItem(step, i))
+            if selected_index is not None and self.steps:
+                list_view.index = min(selected_index, len(self.steps) - 1)
+            elif not self.steps:
+                list_view.index = None
 
     @staticmethod
     def _options_from_values(values: tuple[str, ...] | list[str]) -> list[tuple[str, str]]:
@@ -483,20 +556,19 @@ class FlowConfigApp(App[None]):
 
     @on(ListView.Selected, "#step-list")
     def _on_step_selected(self, event: ListView.Selected) -> None:
+        if self._suppress_step_events:
+            return
         item = cast(StepListItem, event.item)
-        self.current_step_index = item.step_index
-        self._populate_form(item.step)
+        self._set_selected_step(item.step_index, save_current=True, sync_list=False)
         
     @on(ListView.Highlighted, "#step-list")
     def _on_step_highlighted(self, event: ListView.Highlighted) -> None:
-         # Salva automaticamente o formulário atual antes de trocar de tab (se houver algo válido selecionado)
-         if self.current_step_index is not None:
-             self._save_form_to_step(self.current_step_index)
-             
-         if event.item is not None:
-             item = cast(StepListItem, event.item)
-             self.current_step_index = item.step_index
-             self._populate_form(item.step)
+        if self._suppress_step_events:
+            return
+        if event.item is None:
+            return
+        item = cast(StepListItem, event.item)
+        self._set_selected_step(item.step_index, save_current=True, sync_list=False)
 
     def _populate_form(self, step: FlowStep) -> None:
         self.query_one("#empty-state").add_class("hidden")
@@ -644,7 +716,7 @@ class FlowConfigApp(App[None]):
     def action_new_step(self) -> None:
         # Salva o atual se houver
         if self.current_step_index is not None:
-             self._save_form_to_step(self.current_step_index)
+            self._save_form_to_step(self.current_step_index)
              
         new_step = FlowStep(
             key=f"step_{len(self.steps) + 1}",
@@ -655,10 +727,9 @@ class FlowConfigApp(App[None]):
             input_template=DEFAULT_INPUT_TEMPLATE
         )
         self.steps.append(new_step)
+        self.current_step_index = len(self.steps) - 1
         self._refresh_list()
-        
-        list_view = self.query_one("#step-list", ListView)
-        list_view.index = len(self.steps) - 1
+        self._set_selected_step(self.current_step_index, sync_list=True)
 
     @on(Button.Pressed, "#btn-delete")
     def _delete_step(self) -> None:
@@ -668,16 +739,13 @@ class FlowConfigApp(App[None]):
         idx = self.current_step_index
         self.steps.pop(idx)
         self.current_step_index = None
-        
-        self.query_one("#step-form").add_class("hidden")
-        self.query_one("#empty-state").remove_class("hidden")
-        
         self._refresh_list()
-        
+
         # Tenta selecionar o próximo ou anterior
-        list_view = self.query_one("#step-list", ListView)
         if self.steps:
-            list_view.index = min(idx, len(self.steps) - 1)
+            self._set_selected_step(min(idx, len(self.steps) - 1), sync_list=True)
+        else:
+            self._set_selected_step(None, sync_list=True)
 
     @on(Button.Pressed, "#btn-up")
     def _move_up(self) -> None:
@@ -687,27 +755,29 @@ class FlowConfigApp(App[None]):
         self._save_form_to_step(self.current_step_index)
         idx = self.current_step_index
         
-        # Realiza o swap
+        # Realiza o swap no modelo e move o item no ListView nativamente
         self.steps[idx - 1], self.steps[idx] = self.steps[idx], self.steps[idx - 1]
-        self._refresh_list()
-        
         list_view = self.query_one("#step-list", ListView)
-        list_view.index = idx - 1
+        with self._suspend_step_events_context():
+            list_view.move_child(idx, before=idx - 1)
+        self._sync_step_list_metadata()
+        self._set_selected_step(idx - 1, sync_list=True)
 
     @on(Button.Pressed, "#btn-down")
     def _move_down(self) -> None:
-         if self.current_step_index is None or self.current_step_index >= len(self.steps) - 1:
+        if self.current_step_index is None or self.current_step_index >= len(self.steps) - 1:
             return
             
-         self._save_form_to_step(self.current_step_index)
-         idx = self.current_step_index
-         
-         # Realiza o swap
-         self.steps[idx + 1], self.steps[idx] = self.steps[idx], self.steps[idx + 1]
-         self._refresh_list()
-         
-         list_view = self.query_one("#step-list", ListView)
-         list_view.index = idx + 1
+        self._save_form_to_step(self.current_step_index)
+        idx = self.current_step_index
+
+        # Realiza o swap no modelo e move o item no ListView nativamente
+        self.steps[idx + 1], self.steps[idx] = self.steps[idx], self.steps[idx + 1]
+        list_view = self.query_one("#step-list", ListView)
+        with self._suspend_step_events_context():
+            list_view.move_child(idx, after=idx + 1)
+        self._sync_step_list_metadata()
+        self._set_selected_step(idx + 1, sync_list=True)
 
     def action_quit_app(self) -> None:
         self.exit()
