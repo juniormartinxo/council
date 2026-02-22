@@ -404,31 +404,45 @@ class FlowConfigApp(App[None]):
     def _save_form_to_step(self, index: int) -> None:
         if index < 0 or index >= len(self.steps):
             return
-            
-        step = self.steps[index]
-        step.key = self.query_one("#in-key", Input).value.strip() or f"step_{index + 1}"
-        step.agent_name = self.query_one("#in-agent-name", Input).value.strip() or "Agent"
-        step.role_desc = self.query_one("#in-role-desc", Input).value.strip() or "Role"
-        step.style = self.query_one("#in-style", Input).value.strip() or "blue"
-        step.command = self.query_one("#in-command", Input).value.strip() or "echo 'no command'"
-        
-        step.instruction = self.query_one("#ta-instruction", TextArea).text.strip()
-        step.input_template = (
+
+        key = self.query_one("#in-key", Input).value.strip() or f"step_{index + 1}"
+        agent_name = self.query_one("#in-agent-name", Input).value.strip() or "Agent"
+        role_desc = self.query_one("#in-role-desc", Input).value.strip() or "Role"
+        style = self.query_one("#in-style", Input).value.strip() or "blue"
+        command = self.query_one("#in-command", Input).value.strip() or "echo 'no command'"
+        instruction = self.query_one("#ta-instruction", TextArea).text.strip()
+        input_template = (
             self.query_one("#ta-input-template", TextArea).text.strip() or DEFAULT_INPUT_TEMPLATE
         )
-        step.is_code = self.query_one("#cb-is-code", Checkbox).value
-        
+        is_code = self.query_one("#cb-is-code", Checkbox).value
+
         timeout_val = self._parse_int_field(self.query_one("#in-timeout", Input).value)
-        step.timeout = timeout_val if timeout_val is not None else 120
-        
-        step.max_input_chars = self._parse_int_field(self.query_one("#in-max-input", Input).value)
-        step.max_output_chars = self._parse_int_field(self.query_one("#in-max-output", Input).value)
-        step.max_context_chars = self._parse_int_field(self.query_one("#in-max-context", Input).value)
-        
+        timeout = timeout_val if timeout_val is not None else 120
+        max_input_chars = self._parse_int_field(self.query_one("#in-max-input", Input).value)
+        max_output_chars = self._parse_int_field(self.query_one("#in-max-output", Input).value)
+        max_context_chars = self._parse_int_field(self.query_one("#in-max-context", Input).value)
+
+        updated_step = FlowStep(
+            key=key,
+            agent_name=agent_name,
+            role_desc=role_desc,
+            command=command,
+            instruction=instruction,
+            input_template=input_template,
+            style=style,
+            is_code=is_code,
+            timeout=timeout,
+            max_input_chars=max_input_chars,
+            max_output_chars=max_output_chars,
+            max_context_chars=max_context_chars,
+        )
+        self.steps[index] = updated_step
+
         # Opcional: Atualiza label na lista
         list_view = self.query_one("#step-list", ListView)
         if index < len(list_view.children):
             item = cast(StepListItem, list_view.children[index])
+            item.step = updated_step
             item.update_label()
 
     @on(Button.Pressed, "#btn-new")
