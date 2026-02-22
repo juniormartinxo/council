@@ -315,9 +315,27 @@ Recomendações que não são vulnerabilidades diretas, mas fortalecem a postura
 **Risco residual:**
 - A escolha de valores inadequados (muito baixos ou muito altos) continua sendo risco operacional de configuração do fluxo.
 
-### DEF-04 — Assinatura e verificação de `flow.json`
+### DEF-04 — Assinatura e verificação de `flow.json` (✔️ Mitigado em 2026-02-22)
 
-Para o futuro marketplace de fluxos (ROADMAP §7), fluxos baixados devem incluir assinatura criptográfica (ex: hash SHA-256 + assinatura do autor) para garantir integridade e autoria verificável.
+**Status atual (mitigado em 2026-02-22):**
+- Suporte implementado para assinatura Ed25519 de `flow.json` via sidecar `flow.json.sig`.
+- Verificação automática integrada ao carregamento do fluxo (`load_flow_steps`) antes do parse do JSON.
+- Modo estrito adiciona fail-closed para execução sem assinatura válida: `COUNCIL_REQUIRE_FLOW_SIGNATURE=1`.
+- Trust store local de chaves públicas com `key_id` em `COUNCIL_HOME/trusted_flow_keys/<key_id>.pem`.
+- Novos comandos operacionais:
+  - `council flow keygen`
+  - `council flow sign`
+  - `council flow trust`
+  - `council flow verify`
+
+**Risco residual:**
+- Com `COUNCIL_REQUIRE_FLOW_SIGNATURE` desativado, fluxos sem assinatura continuam permitidos por compatibilidade retroativa.
+- A confiança continua dependente da distribuição segura das chaves públicas e da higiene do host local.
+- As chaves privadas geradas para assinatura (`*.key.pem`) são salvas sem passphrase (`NoEncryption`) por design para uso CLI local, protegidas apenas por permissão de arquivo (`0o600`); recomenda-se armazenamento em diretório restrito, segredo de CI adequado ou key management externo para ambientes sensíveis.
+
+**Evidência:**
+- Código: `council/flow_signature.py`, `council/config.py`, `council/main.py`
+- Testes: `tests/test_flow_signature.py`, `tests/test_config.py`, `tests/test_main.py`
 
 ---
 
