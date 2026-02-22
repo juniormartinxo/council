@@ -107,14 +107,11 @@ def _probe_codex(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
 
 
 def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
-    candidates = [
-        ["claude", "-p", "/usage", "--output-format", "text", "--no-session-persistence"],
-        ["claude", "-p", "/cost", "--output-format", "text", "--no-session-persistence"],
-    ]
+    candidates = ["/usage", "/cost"]
     last_attempt: _CommandAttemptResult | None = None
 
-    for command in candidates:
-        attempt = _run_probe_command(command, timeout_seconds=timeout_seconds)
+    for slash_command in candidates:
+        attempt = _run_claude_repl_command(slash_command, timeout_seconds=timeout_seconds)
         last_attempt = attempt
         entries = _parse_claude_entries(attempt.output)
         if entries:
@@ -139,32 +136,31 @@ def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
 
 
 def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
-    about_attempt = _run_probe_command(
-        ["gemini", "-p", "/about", "--output-format", "text"],
-        timeout_seconds=timeout_seconds,
-    )
+    about_attempt = _run_gemini_repl_command("/about", timeout_seconds=timeout_seconds)
     about_model = _extract_model_from_output(about_attempt.output)
     about_tier = _extract_tier_from_output(about_attempt.output)
-    candidates = [
-        ["gemini", "-p", "/stats", "--output-format", "text"],
-        ["gemini", "-p", "/usage", "--output-format", "text"],
-        ["gemini", "-p", "/status", "--output-format", "text"],
-    ]
-    last_attempt: _CommandAttemptResult | None = None
+    about_entries = _parse_generic_entries(about_attempt.output)
+    if about_entries:
+        return ProviderRateLimitProbeResult(
+            binary="gemini",
+            status="ok",
+            summary=_entries_summary(about_entries),
+            entries=about_entries,
+            source=_format_command(about_attempt.command),
+            model=about_model,
+        )
 
-    for command in candidates:
-        attempt = _run_probe_command(command, timeout_seconds=timeout_seconds)
-        last_attempt = attempt
-        entries = _parse_generic_entries(attempt.output)
-        if entries:
-            return ProviderRateLimitProbeResult(
-                binary="gemini",
-                status="ok",
-                summary=_entries_summary(entries),
-                entries=entries,
-                source=_format_command(attempt.command),
-                model=_extract_model_from_output(attempt.output) or about_model,
-            )
+    stats_attempt = _run_gemini_repl_command("/stats", timeout_seconds=timeout_seconds)
+    stats_entries = _parse_generic_entries(stats_attempt.output)
+    if stats_entries:
+        return ProviderRateLimitProbeResult(
+            binary="gemini",
+            status="ok",
+            summary=_entries_summary(stats_entries),
+            entries=stats_entries,
+            source=_format_command(stats_attempt.command),
+            model=_extract_model_from_output(stats_attempt.output) or about_model,
+        )
 
     about_details: list[str] = []
     if about_model:
@@ -172,18 +168,140 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
     if about_tier:
         about_details.append(f"tier {about_tier}")
     about_suffix = f"; /about: {', '.join(about_details)}" if about_details else ""
-    source_attempt = last_attempt if last_attempt is not None else about_attempt
+    source_attempt = stats_attempt
     return ProviderRateLimitProbeResult(
         binary="gemini",
         status="unavailable",
         summary=(
             "sem indicador de cota restante via CLI; use /stats para uso da sessão "
-            f"({_attempt_reason(last_attempt)}){about_suffix}"
+            f"({_attempt_reason(stats_attempt)}){about_suffix}"
         ),
         entries=(),
         source=_format_command(source_attempt.command) if source_attempt is not None else None,
         model=about_model,
     )
+
+
+def _run_gemini_repl_command(slash_command: str, *, timeout_seconds: int) -> _CommandAttemptResult:
+    return _run_interactive_repl_command(
+        binary="gemini",
+        slash_command=slash_command,
+        timeout_seconds=timeout_seconds,
+        ready_patterns=(r">", r"\$"),
+        ready_timeout=15,
+        response_patterns=(r">\s*$",),
+        response_timeout=10,
+    )
+
+
+def _run_claude_repl_command(slash_command: str, *, timeout_seconds: int) -> _CommandAttemptResult:
+    return _run_interactive_repl_command(
+        binary="claude",
+        slash_command=slash_command,
+        timeout_seconds=timeout_seconds,
+        ready_patterns=(r">\s*$", r"\$\s*$"),
+        ready_timeout=20,
+        response_patterns=(r">\s*$", r"Resets"),
+        response_timeout=10,
+    )
+
+
+def _run_interactive_repl_command(
+    *,
+    binary: str,
+    slash_command: str,
+    timeout_seconds: int,
+    ready_patterns: tuple[str, ...],
+    ready_timeout: int,
+    response_patterns: tuple[str, ...],
+    response_timeout: int,
+) -> _CommandAttemptResult:
+    child: pexpect.spawn | None = None
+    command = (binary, slash_command)
+    try:
+        child = pexpect.spawn(
+            binary,
+            timeout=timeout_seconds,
+            encoding="utf-8",
+        )
+        ready_index = child.expect(
+            [*ready_patterns, pexpect.TIMEOUT],
+            timeout=min(ready_timeout, timeout_seconds),
+        )
+        if ready_index == len(ready_patterns):
+            output = _strip_ansi(child.before or "")
+            _terminate_repl_child(child)
+            return _CommandAttemptResult(
+                command=command,
+                return_code=None,
+                output=output,
+                timed_out=True,
+                error="timeout",
+            )
+
+        child.sendline(slash_command)
+        response_index = child.expect(
+            [*response_patterns, pexpect.TIMEOUT],
+            timeout=min(response_timeout, timeout_seconds),
+        )
+        output = _strip_ansi(child.before or "")
+
+        if response_index == len(response_patterns):
+            _terminate_repl_child(child)
+            return _CommandAttemptResult(
+                command=command,
+                return_code=None,
+                output=output,
+                timed_out=True,
+                error="timeout",
+            )
+
+        _terminate_repl_child(child)
+        return _CommandAttemptResult(
+            command=command,
+            return_code=child.exitstatus if child.exitstatus is not None else 0,
+            output=output,
+            timed_out=False,
+            error=None,
+        )
+    except pexpect.exceptions.ExceptionPexpect as exc:
+        if child is not None:
+            _terminate_repl_child(child)
+        return _CommandAttemptResult(
+            command=command,
+            return_code=None,
+            output="",
+            timed_out=False,
+            error=str(exc),
+        )
+    except OSError as exc:
+        if child is not None:
+            _terminate_repl_child(child)
+        return _CommandAttemptResult(
+            command=command,
+            return_code=None,
+            output="",
+            timed_out=False,
+            error=str(exc),
+        )
+
+
+def _terminate_repl_child(child: pexpect.spawn) -> None:
+    try:
+        child.sendline("/exit")
+    except Exception:
+        pass
+    try:
+        child.expect(pexpect.EOF, timeout=5)
+    except Exception:
+        pass
+    try:
+        child.close()
+    except Exception:
+        try:
+            child.close(force=True)
+        except Exception:
+            pass
 
 
 def _run_probe_command(command: list[str], *, timeout_seconds: int) -> _CommandAttemptResult:
