@@ -2,9 +2,10 @@ import sys
 import os
 import shlex
 import logging
+import json
 import typer
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from typing_extensions import Annotated
 from rich.console import Console
 from rich.panel import Panel
@@ -32,6 +33,7 @@ from council.config import (
     FLOW_CONFIG_SOURCE_USER,
     FlowStep,
     ResolvedFlowConfig,
+    get_default_flow_steps,
     load_flow_steps,
     resolve_flow_config,
 )
@@ -70,6 +72,7 @@ app.add_typer(flow_app, name="flow")
 
 _SUPPORTED_PROVIDER_LIMIT_BINARIES = {"codex", "claude", "gemini"}
 _PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS = 8
+_DEFAULT_INPUT_TEMPLATE = "{instruction}\n\n{full_context}"
 
 
 @app.callback()
@@ -356,6 +359,354 @@ def _resolve_existing_file(raw_path: str, *, label: str) -> Path:
     if not path.is_file():
         raise typer.BadParameter(f"O caminho informado para {label} não é arquivo: {path}")
     return path
+
+
+def _resolve_flow_edit_path(flow_config: str | None) -> Path | None:
+    if flow_config is None:
+        try:
+            resolved_config = resolve_flow_config(None)
+            if resolved_config.source in (FLOW_CONFIG_SOURCE_DEFAULT, FLOW_CONFIG_SOURCE_ENV):
+                return None
+            return resolved_config.path
+        except ConfigError:
+            return None
+    return Path(flow_config).expanduser()
+
+
+def _parse_flow_editor_name(raw_value: str, *, source: str) -> Literal["tui", "simple"]:
+    normalized = raw_value.strip().lower()
+    if normalized == "tui":
+        return "tui"
+    if normalized == "simple":
+        return "simple"
+    raise typer.BadParameter(
+        f"Editor inválido em {source}: '{raw_value}'. Use 'tui' ou 'simple'."
+    )
+
+
+def _resolve_flow_editor_choice(editor: str | None) -> Literal["tui", "simple"]:
+    if editor is not None:
+        return _parse_flow_editor_name(editor, source="--editor")
+
+    if not sys.stdin.isatty():
+        return "tui"
+
+    while True:
+        selected = typer.prompt(
+            "Escolha o editor de fluxo (tui/simple)",
+            default="tui",
+        )
+        try:
+            return _parse_flow_editor_name(selected, source="prompt")
+        except typer.BadParameter as exc:
+            typer.echo(str(exc))
+
+
+def _load_flow_steps_for_editor(flow_path: Path | None) -> list[FlowStep]:
+    if flow_path is None or not flow_path.exists():
+        return get_default_flow_steps()
+    try:
+        return load_flow_steps(str(flow_path))
+    except ConfigError as exc:
+        typer.echo(f"Aviso: falha ao carregar '{flow_path}': {exc}")
+        typer.echo("Editor iniciará com o fluxo default interno.")
+        return get_default_flow_steps()
+
+
+def _summarize_flow_steps(steps: list[FlowStep]) -> None:
+    typer.echo("")
+    typer.echo("Passos atuais:")
+    if not steps:
+        typer.echo("  (nenhum passo)")
+        return
+    for index, step in enumerate(steps, start=1):
+        command_preview = step.command.replace("\n", " ").strip() or "(vazio)"
+        if len(command_preview) > 60:
+            command_preview = f"{command_preview[:57]}..."
+        typer.echo(
+            f"  {index}. key={step.key} | agent={step.agent_name} | command={command_preview}"
+        )
+
+
+def _prompt_positive_int(label: str, default: int) -> int:
+    while True:
+        raw_value = typer.prompt(label, default=str(default)).strip()
+        try:
+            parsed_value = int(raw_value)
+        except ValueError:
+            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo.")
+            continue
+        if parsed_value <= 0:
+            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo.")
+            continue
+        return parsed_value
+
+
+def _prompt_optional_positive_int(label: str, default: int | None) -> int | None:
+    while True:
+        default_text = str(default) if default is not None else ""
+        raw_value = typer.prompt(label, default=default_text).strip()
+        if not raw_value:
+            return None
+        try:
+            parsed_value = int(raw_value)
+        except ValueError:
+            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo ou vazio.")
+            continue
+        if parsed_value <= 0:
+            typer.echo(f"Valor inválido para '{label}'. Informe inteiro positivo ou vazio.")
+            continue
+        return parsed_value
+
+
+def _prompt_text_field(
+    label: str,
+    default: str,
+    *,
+    fallback: str | None = None,
+    decode_newlines: bool = False,
+) -> str:
+    prompt_default = default.replace("\n", "\\n") if decode_newlines else default
+    raw_value = typer.prompt(label, default=prompt_default).strip()
+    value = raw_value.replace("\\n", "\n") if decode_newlines else raw_value
+    if value:
+        return value
+    if fallback is not None:
+        return fallback
+    return default
+
+
+def _prompt_step_index(total_steps: int, label: str, *, default_value: int = 1) -> int | None:
+    if total_steps <= 0:
+        typer.echo("Não há passos disponíveis para essa ação.")
+        return None
+    raw_value = typer.prompt(label, default=str(default_value)).strip()
+    try:
+        parsed_value = int(raw_value)
+    except ValueError:
+        typer.echo("Índice inválido. Informe um número inteiro.")
+        return None
+    if parsed_value < 1 or parsed_value > total_steps:
+        typer.echo(f"Índice fora do intervalo. Use valores entre 1 e {total_steps}.")
+        return None
+    return parsed_value - 1
+
+
+def _prompt_step_form(step: FlowStep, index: int) -> FlowStep:
+    typer.echo("")
+    typer.echo(f"Editando passo #{index + 1} (use Enter para manter padrão).")
+    key = _prompt_text_field("key", step.key, fallback=f"step_{index + 1}")
+    agent_name = _prompt_text_field("agent_name", step.agent_name, fallback="Agent")
+    role_desc = _prompt_text_field("role_desc", step.role_desc, fallback="Role")
+    command = _prompt_text_field("command", step.command, fallback="echo 'no command'")
+    instruction = _prompt_text_field(
+        "instruction (use \\n para nova linha)",
+        step.instruction,
+        fallback="instruction",
+        decode_newlines=True,
+    )
+    input_template = _prompt_text_field(
+        "input_template (use \\n para nova linha)",
+        step.input_template,
+        fallback=_DEFAULT_INPUT_TEMPLATE,
+        decode_newlines=True,
+    )
+    style = _prompt_text_field("style", step.style, fallback="blue")
+    is_code = typer.confirm("is_code?", default=step.is_code)
+    timeout = _prompt_positive_int("timeout (segundos)", step.timeout)
+    max_input_chars = _prompt_optional_positive_int(
+        "max_input_chars (vazio = padrão)",
+        step.max_input_chars,
+    )
+    max_output_chars = _prompt_optional_positive_int(
+        "max_output_chars (vazio = padrão)",
+        step.max_output_chars,
+    )
+    max_context_chars = _prompt_optional_positive_int(
+        "max_context_chars (vazio = padrão)",
+        step.max_context_chars,
+    )
+
+    return FlowStep(
+        key=key,
+        agent_name=agent_name,
+        role_desc=role_desc,
+        command=command,
+        instruction=instruction,
+        input_template=input_template,
+        style=style,
+        is_code=is_code,
+        timeout=timeout,
+        max_input_chars=max_input_chars,
+        max_output_chars=max_output_chars,
+        max_context_chars=max_context_chars,
+    )
+
+
+def _new_default_step(position: int) -> FlowStep:
+    return FlowStep(
+        key=f"step_{position}",
+        agent_name="Agent",
+        role_desc="Role",
+        command="codex exec --skip-git-repo-check",
+        instruction="instruction",
+        input_template=_DEFAULT_INPUT_TEMPLATE,
+    )
+
+
+def _run_simple_flow_editor_session(initial_steps: list[FlowStep]) -> tuple[list[FlowStep], bool]:
+    steps = list(initial_steps)
+    while True:
+        _summarize_flow_steps(steps)
+        action = typer.prompt(
+            "Ação [e=editar, a=adicionar, r=remover, m=mover, s=salvar, q=sair]",
+            default="s",
+        ).strip().lower()
+
+        if action == "e":
+            index = _prompt_step_index(len(steps), "Número do passo para editar")
+            if index is None:
+                continue
+            steps[index] = _prompt_step_form(steps[index], index)
+            continue
+
+        if action == "a":
+            new_step = _prompt_step_form(_new_default_step(len(steps) + 1), len(steps))
+            steps.append(new_step)
+            continue
+
+        if action == "r":
+            index = _prompt_step_index(len(steps), "Número do passo para remover")
+            if index is None:
+                continue
+            step = steps[index]
+            if typer.confirm(
+                f"Remover passo #{index + 1} ({step.key})?",
+                default=False,
+                show_default=True,
+            ):
+                steps.pop(index)
+            continue
+
+        if action == "m":
+            if len(steps) < 2:
+                typer.echo("É necessário ter pelo menos 2 passos para reordenar.")
+                continue
+            source_index = _prompt_step_index(
+                len(steps),
+                "Mover passo de qual posição?",
+            )
+            if source_index is None:
+                continue
+            target_index = _prompt_step_index(
+                len(steps),
+                "Mover para qual posição?",
+                default_value=source_index + 1,
+            )
+            if target_index is None:
+                continue
+            moved_step = steps.pop(source_index)
+            steps.insert(target_index, moved_step)
+            continue
+
+        if action == "s":
+            if not steps:
+                typer.echo("O fluxo precisa ter pelo menos um passo antes de salvar.")
+                continue
+            return steps, True
+
+        if action == "q":
+            if typer.confirm("Sair sem salvar alterações?", default=False, show_default=True):
+                return steps, False
+            continue
+
+        typer.echo("Ação inválida. Use: e, a, r, m, s ou q.")
+
+
+def _serialize_flow_steps(steps: list[FlowStep]) -> dict[str, list[dict[str, object]]]:
+    payload: dict[str, list[dict[str, object]]] = {"steps": []}
+    for step in steps:
+        normalized_input_template = step.input_template.strip() or _DEFAULT_INPUT_TEMPLATE
+        serialized_step: dict[str, object] = {
+            "key": step.key,
+            "agent_name": step.agent_name,
+            "role_desc": step.role_desc,
+            "command": step.command,
+            "instruction": step.instruction,
+        }
+        if normalized_input_template != _DEFAULT_INPUT_TEMPLATE:
+            serialized_step["input_template"] = normalized_input_template
+        if step.style != "blue":
+            serialized_step["style"] = step.style
+        if step.is_code:
+            serialized_step["is_code"] = True
+        if step.timeout != 120:
+            serialized_step["timeout"] = step.timeout
+        if step.max_input_chars:
+            serialized_step["max_input_chars"] = step.max_input_chars
+        if step.max_output_chars:
+            serialized_step["max_output_chars"] = step.max_output_chars
+        if step.max_context_chars:
+            serialized_step["max_context_chars"] = step.max_context_chars
+        payload["steps"].append(serialized_step)
+    return payload
+
+
+def _save_flow_steps(flow_path: Path, steps: list[FlowStep]) -> None:
+    flow_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _serialize_flow_steps(steps)
+    with flow_path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, ensure_ascii=False)
+        file.write("\n")
+
+    signature_path = get_signature_file_path(flow_path)
+    if signature_path.exists():
+        signature_path.unlink()
+        typer.echo("Aviso: assinatura sidecar anterior invalidada e apagada.")
+
+
+def _resolve_save_path(flow_path: Path | None) -> Path:
+    if flow_path is not None:
+        return flow_path
+    suggested_path = str(Path.cwd() / "flow.json")
+    raw_path = typer.prompt("Salvar fluxo em", default=suggested_path).strip()
+    return Path(raw_path).expanduser()
+
+
+def _run_flow_edit_simple(flow_path: Path | None) -> None:
+    steps = _load_flow_steps_for_editor(flow_path)
+    typer.echo("Editor simples de flow.json (modo terminal).")
+    typer.echo("Dica: use \\n para inserir quebra de linha em instruction/input_template.")
+
+    updated_steps, should_save = _run_simple_flow_editor_session(steps)
+    if not should_save:
+        typer.echo("Edição cancelada sem salvar.")
+        return
+
+    target_path = _resolve_save_path(flow_path)
+    try:
+        _save_flow_steps(target_path, updated_steps)
+    except OSError as exc:
+        typer.echo(f"Erro ao salvar fluxo em '{target_path}': {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Fluxo salvo em: {target_path}")
+
+
+def _run_flow_edit_tui(flow_path: Path | None) -> None:
+    try:
+        from council.flow_tui import FlowConfigApp
+    except ModuleNotFoundError as exc:
+        if exc.name == "textual":
+            typer.echo(
+                "Dependência 'textual' não encontrada. "
+                "Instale com: pip install -r requirements.txt"
+            )
+            raise typer.Exit(code=1)
+        raise
+
+    app = FlowConfigApp(config_path=flow_path)
+    app.run()
 
 
 @app.command()
@@ -900,35 +1251,28 @@ def flow_edit(
             ),
         ),
     ] = None,
+    editor: Annotated[
+        Optional[str],
+        typer.Option(
+            "--editor",
+            "-e",
+            help=(
+                "Editor usado para edição de fluxo: "
+                "'tui' (Textual) ou 'simple' (prompt no terminal). "
+                "Se omitido, pergunta em modo interativo."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """
-    Inicia o editor visual de flow.json (TUI).
+    Inicia a edição de flow.json, com escolha de editor (TUI ou terminal simples).
     """
-    if flow_config is None:
-        try:
-            resolved_config = resolve_flow_config(None)
-            if resolved_config.source in (FLOW_CONFIG_SOURCE_DEFAULT, FLOW_CONFIG_SOURCE_ENV):
-                 flow_path = None # Força a interface a perguntar "Save As" no dir local
-            else:
-                 flow_path = resolved_config.path
-        except ConfigError:
-            flow_path = None
-    else:
-        flow_path = Path(flow_config).expanduser()
-        
-    try:
-        from council.flow_tui import FlowConfigApp
-    except ModuleNotFoundError as exc:
-        if exc.name == "textual":
-            typer.echo(
-                "Dependência 'textual' não encontrada. "
-                "Instale com: pip install -r requirements.txt"
-            )
-            raise typer.Exit(code=1)
-        raise
-
-    app = FlowConfigApp(config_path=flow_path)
-    app.run()
+    flow_path = _resolve_flow_edit_path(flow_config)
+    selected_editor = _resolve_flow_editor_choice(editor)
+    if selected_editor == "simple":
+        _run_flow_edit_simple(flow_path)
+        return
+    _run_flow_edit_tui(flow_path)
 
 
 @flow_app.command("trust")
