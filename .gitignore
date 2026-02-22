@@ -28,6 +28,11 @@ htmlcov/
 # Environment and local overrides
 .env
 .env.*
+.envrc.local
+
+# Local flow signing keys
+*.key.pem
+*.pub.pem
 
 # IDE/editor files
 .vscode/
