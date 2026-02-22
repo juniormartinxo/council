@@ -51,7 +51,7 @@ Cada passo define:
 
 O `input_template` suporta placeholders como `{user_prompt}`, `{full_context}`, `{last_output}` e qualquer `key` já produzido anteriormente (`{plan}`, `{code}`, etc.), permitindo que o dev decida qual IA assume cada papel sem alterar o core.
 
-No carregamento de `flow.json`, o `config.py` tambem aplica validacao semantica do `command` (sintaxe shell valida, binario presente no `PATH` e bloqueio de operadores perigosos/quebras de linha) antes da execucao do passo.
+No carregamento de `flow.json`, o `config.py` também aplica validação semântica do `command` antes da execução do passo: sintaxe shell válida, binário presente no `PATH`, binário na allowlist (`claude`, `gemini`, `codex`, `ollama`), bloqueio de caminho explícito no primeiro token e rejeição de operadores perigosos/quebras de linha.
 
 Para formato, exemplos e validações operacionais, consulte `FLOW_CONFIG.md`.
 
@@ -62,4 +62,4 @@ Ao injetarmos requisições pipeadas `string -> subprocess(cmd)`, sistemas avan�
 Para garantir orquestração fluida em rotinas invisíveis, o orquestrador impõe explicitamente bandeiras mitigadoras (Headless Mode):
 - Codex: Invoca-se através de `codex exec --skip-git-repo-check` para desviar da interface TUI/Menu e anular a validação forçada sobre o repositório Git subjacente.
 - Claude: Adicionado o modo _print_ `-p` estritamente para não invocar prompt de aprovação interativo.
-- Gemini: Como refinamento da camada de infraestrutura (`executor.py`), o proxy atua interceptando o binário `gemini`. Ele faz o auto-escaping seguro do prompt concatenado pela library `shlex` no momento das invocações como `gemini -p`, neutralizando prompts interativos mal-formados e falhas atreladas a STDIN inexistentes em Subprocessos.
+- Gemini: no caso `gemini -p`/`--prompt` sem valor explícito, o `executor.py` detecta o padrão e injeta o payload via `argv` em bloco delimitado (`===COUNCIL_INPUT_ARGV_START===`/`===COUNCIL_INPUT_ARGV_END===`), mantendo execução com `subprocess.Popen(..., shell=False)`.
