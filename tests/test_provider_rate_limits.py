@@ -102,8 +102,11 @@ def test_probe_gemini_uses_about_as_fallback_for_model_and_tier() -> None:
             (0, ""),
         ]
     )
+    stats_probe_child = Mock()
+    stats_probe_child.before = "No quota information found"
+    stats_probe_child.exitstatus = 0
 
-    with patch("pexpect.spawn", side_effect=[about_child, stats_child]):
+    with patch("pexpect.spawn", side_effect=[about_child, stats_child, stats_probe_child]):
         result = provider_limits._probe_gemini(timeout_seconds=30)
 
     assert result.status == "unavailable"
@@ -126,16 +129,52 @@ def test_probe_gemini_recovers_model_from_non_interactive_about_probe() -> None:
             (0, ""),
         ]
     )
+    stats_probe_child = Mock()
+    stats_probe_child.before = "No quota information found"
+    stats_probe_child.exitstatus = 0
     about_probe_child = Mock()
     about_probe_child.before = "Model: Auto (Gemini 3)\nTier: AI Pro\n"
     about_probe_child.exitstatus = 0
 
-    with patch("pexpect.spawn", side_effect=[about_child, about_probe_child, stats_child]):
+    with patch(
+        "pexpect.spawn",
+        side_effect=[about_child, about_probe_child, stats_child, stats_probe_child],
+    ):
         result = provider_limits._probe_gemini(timeout_seconds=30)
 
     assert result.status == "unavailable"
     assert result.model == "Auto (Gemini 3)"
     assert "tier AI Pro" in result.summary
+
+
+def test_probe_gemini_uses_non_interactive_stats_when_available() -> None:
+    about_child = _build_interactive_child(
+        [
+            (0, ""),
+            (0, "Model: Auto (Gemini 3)\nTier: AI Pro\n"),
+            (0, ""),
+        ]
+    )
+    stats_child = _build_interactive_child(
+        [
+            (0, ""),
+            (1, ""),
+            (0, ""),
+        ]
+    )
+    stats_probe_child = Mock()
+    stats_probe_child.before = "Current session: 12% used (resets 7pm)"
+    stats_probe_child.exitstatus = 0
+
+    with patch("pexpect.spawn", side_effect=[about_child, stats_child, stats_probe_child]):
+        result = provider_limits._probe_gemini(timeout_seconds=30)
+
+    assert result.status == "ok"
+    assert result.source == "gemini /stats"
+    assert len(result.entries) == 1
+    assert result.entries[0].window == "current session"
+    assert result.entries[0].percent_type == "used"
+    assert result.entries[0].percent_value == 12
 
 
 def test_probe_claude_reads_usage_from_interactive_repl() -> None:
