@@ -578,6 +578,26 @@ def test_flow_edit_rejects_invalid_editor() -> None:
         main_module.flow_edit(flow_config="flow.custom.json", editor="invalid")
 
 
+def test_resolve_role_desc_choice_accepts_suggestion_index() -> None:
+    assert (
+        main_module._resolve_role_desc_choice("1", "Custom")
+        == main_module._ROLE_DESC_SUGGESTIONS[0][0]
+    )
+
+
+def test_resolve_role_desc_choice_accepts_free_text() -> None:
+    assert main_module._resolve_role_desc_choice("Arquitetura", "Planejamento") == "Arquitetura"
+
+
+def test_resolve_role_desc_choice_uses_current_value_when_empty() -> None:
+    assert main_module._resolve_role_desc_choice("   ", "Planejamento") == "Planejamento"
+
+
+def test_resolve_role_desc_choice_rejects_out_of_range_numeric_value() -> None:
+    with pytest.raises(ValueError):
+        main_module._resolve_role_desc_choice("999", "Planejamento")
+
+
 def test_flow_sign_command_reports_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
