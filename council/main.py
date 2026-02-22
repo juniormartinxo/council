@@ -1,6 +1,7 @@
 import sys
 import logging
 import typer
+from pathlib import Path
 from typing import Optional
 from typing_extensions import Annotated
 
@@ -23,6 +24,15 @@ from council.config import (
     resolve_flow_config,
 )
 from council.history_store import HistoryStore
+from council.flow_signature import (
+    FLOW_SIGNATURE_REQUIRED_ENV_VAR,
+    FlowSignatureError,
+    generate_flow_signing_keypair,
+    get_signature_file_path,
+    sign_flow_file,
+    trust_flow_public_key,
+    verify_flow_signature,
+)
 from council.paths import get_tui_state_file_path
 from council.prerequisites import (
     BinaryPrerequisiteStatus,
@@ -37,7 +47,9 @@ app = typer.Typer(
     add_completion=False,
 )
 history_app = typer.Typer(help="Gerencia histórico local da TUI.")
+flow_app = typer.Typer(help="Assinatura e verificação de integridade de flow.json.")
 app.add_typer(history_app, name="history")
+app.add_typer(flow_app, name="flow")
 
 @app.callback()
 def main():
@@ -121,6 +133,15 @@ def _render_doctor_status_line(status: BinaryPrerequisiteStatus) -> str:
     if status.is_world_writable_location:
         return f"[WARN] {status.binary}: {resolved_path} (diretório gravável por outros usuários)"
     return f"[OK] {status.binary}: {resolved_path}"
+
+
+def _resolve_existing_file(raw_path: str, *, label: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.exists():
+        raise typer.BadParameter(f"Arquivo não encontrado para {label}: {path}")
+    if not path.is_file():
+        raise typer.BadParameter(f"O caminho informado para {label} não é arquivo: {path}")
+    return path
 
 
 @app.command()
@@ -412,6 +433,247 @@ def tui(
         raise
 
     run_tui(initial_prompt=prompt or "", initial_flow_config=flow_config or "")
+
+
+@flow_app.command("keygen")
+def flow_keygen(
+    key_id: Annotated[
+        str,
+        typer.Option(
+            "--key-id",
+            help="Identificador da chave (ex.: equipe-seguranca-v1).",
+        ),
+    ],
+    private_key: Annotated[
+        Optional[str],
+        typer.Option(
+            "--private-key",
+            "-k",
+            help="Caminho de saída para a chave privada PEM. Padrão: <key-id>.key.pem",
+        ),
+    ] = None,
+    public_key: Annotated[
+        Optional[str],
+        typer.Option(
+            "--public-key",
+            "-u",
+            help="Caminho de saída para a chave pública PEM. Padrão: <key-id>.pub.pem",
+        ),
+    ] = None,
+    trust: Annotated[
+        bool,
+        typer.Option(
+            "--trust",
+            help="Registra automaticamente a chave pública no trust store local.",
+        ),
+    ] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="Permite sobrescrever arquivos de chave já existentes.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Gera par de chaves Ed25519 para assinatura de flow.json.
+    """
+    normalized_key_id = key_id.strip()
+    if not normalized_key_id:
+        raise typer.BadParameter("Informe um valor não vazio para --key-id.")
+
+    private_key_path = (
+        Path(private_key).expanduser()
+        if private_key
+        else Path(f"{normalized_key_id}.key.pem")
+    )
+    public_key_path = (
+        Path(public_key).expanduser()
+        if public_key
+        else Path(f"{normalized_key_id}.pub.pem")
+    )
+
+    try:
+        generate_flow_signing_keypair(
+            private_key_path=private_key_path,
+            public_key_path=public_key_path,
+            overwrite=overwrite,
+        )
+        trusted_path: Path | None = None
+        if trust:
+            trusted_path = trust_flow_public_key(
+                public_key_path=public_key_path,
+                key_id=normalized_key_id,
+                overwrite=overwrite,
+            )
+    except FlowSignatureError as exc:
+        typer.echo(f"Falha ao gerar chaves de assinatura: {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Chave privada gerada em: {private_key_path}")
+    typer.echo(f"Chave pública gerada em: {public_key_path}")
+    if trusted_path is not None:
+        typer.echo(f"Chave pública confiada em: {trusted_path}")
+
+
+@flow_app.command("sign")
+def flow_sign(
+    flow_config: Annotated[
+        str,
+        typer.Argument(help="Caminho para o flow.json a ser assinado."),
+    ],
+    private_key: Annotated[
+        str,
+        typer.Option(
+            "--private-key",
+            "-k",
+            help="Caminho para a chave privada PEM do autor.",
+        ),
+    ],
+    key_id: Annotated[
+        str,
+        typer.Option(
+            "--key-id",
+            help="Identificador da chave (deve corresponder ao trust store de quem verifica).",
+        ),
+    ],
+    signature_file: Annotated[
+        Optional[str],
+        typer.Option(
+            "--signature-file",
+            "-s",
+            help="Caminho do arquivo de assinatura. Padrão: <flow>.sig",
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="Permite sobrescrever assinatura existente.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Assina um flow.json e gera sidecar .sig.
+    """
+    flow_path = _resolve_existing_file(flow_config, label="flow_config")
+    private_key_path = _resolve_existing_file(private_key, label="chave privada")
+    signature_path = Path(signature_file).expanduser() if signature_file else None
+
+    try:
+        written_signature_path = sign_flow_file(
+            flow_path=flow_path,
+            private_key_path=private_key_path,
+            key_id=key_id,
+            signature_path=signature_path,
+            overwrite=overwrite,
+        )
+    except FlowSignatureError as exc:
+        typer.echo(f"Falha ao assinar fluxo: {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Assinatura criada: {written_signature_path}")
+    typer.echo(
+        (
+            f"Para bloquear fluxos sem assinatura válida em runtime, defina "
+            f"{FLOW_SIGNATURE_REQUIRED_ENV_VAR}=1."
+        )
+    )
+
+
+@flow_app.command("trust")
+def flow_trust(
+    public_key: Annotated[
+        str,
+        typer.Argument(help="Arquivo PEM da chave pública a confiar."),
+    ],
+    key_id: Annotated[
+        str,
+        typer.Option("--key-id", help="Identificador da chave no trust store local."),
+    ],
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="Permite substituir chave confiada existente para o mesmo key_id.",
+        ),
+    ] = False,
+) -> None:
+    """
+    Registra uma chave pública no trust store local do Council.
+    """
+    public_key_path = _resolve_existing_file(public_key, label="chave pública")
+    try:
+        trusted_path = trust_flow_public_key(
+            public_key_path=public_key_path,
+            key_id=key_id,
+            overwrite=overwrite,
+        )
+    except FlowSignatureError as exc:
+        typer.echo(f"Falha ao confiar chave pública: {exc}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Chave confiada com sucesso em: {trusted_path}")
+
+
+@flow_app.command("verify")
+def flow_verify(
+    flow_config: Annotated[
+        str,
+        typer.Argument(help="Caminho para o flow.json a validar."),
+    ],
+    signature_file: Annotated[
+        Optional[str],
+        typer.Option(
+            "--signature-file",
+            "-s",
+            help="Arquivo de assinatura. Padrão: <flow>.sig",
+        ),
+    ] = None,
+    public_key: Annotated[
+        Optional[str],
+        typer.Option(
+            "--public-key",
+            "-u",
+            help="Arquivo PEM explícito para verificação (bypass do trust store).",
+        ),
+    ] = None,
+) -> None:
+    """
+    Verifica assinatura de flow.json contra trust store local ou chave explícita.
+    """
+    flow_path = _resolve_existing_file(flow_config, label="flow_config")
+    signature_path = (
+        Path(signature_file).expanduser()
+        if signature_file
+        else get_signature_file_path(flow_path)
+    )
+    public_key_path = (
+        _resolve_existing_file(public_key, label="chave pública")
+        if public_key is not None
+        else None
+    )
+
+    try:
+        verify_flow_signature(
+            flow_path=flow_path,
+            signature_path=signature_path,
+            public_key_path=public_key_path,
+            require_signature=True,
+        )
+    except FlowSignatureError as exc:
+        typer.echo(f"Falha na verificação da assinatura: {exc}")
+        raise typer.Exit(code=1)
+
+    verification_scope = "chave pública informada via --public-key"
+    if public_key_path is None:
+        verification_scope = "trust store local"
+    typer.echo(
+        (
+            f"Assinatura válida para '{flow_path}' usando '{signature_path}' "
+            f"({verification_scope})."
+        )
+    )
 
 
 @history_app.command("clear")
