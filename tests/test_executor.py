@@ -4,7 +4,13 @@ from typing import Any
 import pytest
 
 import council.executor as executor_module
-from council.executor import CommandError, ExecutionAborted, Executor
+from council.executor import (
+    CLI_INPUT_BLOCK_END,
+    CLI_INPUT_BLOCK_START,
+    CommandError,
+    ExecutionAborted,
+    Executor,
+)
 
 
 class DummyUI:
@@ -104,7 +110,16 @@ def test_prepare_command_injects_placeholder_and_disables_stdin() -> None:
 
     command_to_run, stdin_payload = executor._prepare_command("gemini -p {input}", "a 'quoted' prompt")
 
-    assert command_to_run == ["gemini", "-p", "a 'quoted' prompt"]
+    assert command_to_run == [
+        "gemini",
+        "-p",
+        (
+            f"{CLI_INPUT_BLOCK_START}\n"
+            "PROMPT INTEGRAL ENVIADO VIA ARGV.\n"
+            "a 'quoted' prompt\n"
+            f"{CLI_INPUT_BLOCK_END}"
+        ),
+    ]
     assert stdin_payload == ""
 
 
@@ -122,7 +137,25 @@ def test_prepare_command_auto_injects_gemini_prompt_when_missing_value() -> None
 
     command_to_run, stdin_payload = executor._prepare_command("gemini -p", "hello world")
 
-    assert command_to_run == ["gemini", "-p", "hello world"]
+    assert command_to_run == [
+        "gemini",
+        "-p",
+        (
+            f"{CLI_INPUT_BLOCK_START}\n"
+            "PROMPT INTEGRAL ENVIADO VIA ARGV.\n"
+            "hello world\n"
+            f"{CLI_INPUT_BLOCK_END}"
+        ),
+    ]
+    assert stdin_payload == ""
+
+
+def test_prepare_command_keeps_empty_argv_payload_as_empty_string() -> None:
+    executor = Executor(DummyUI())
+
+    command_to_run, stdin_payload = executor._prepare_command("gemini -p {input}", "   ")
+
+    assert command_to_run == ["gemini", "-p", ""]
     assert stdin_payload == ""
 
 
