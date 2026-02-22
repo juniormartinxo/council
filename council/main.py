@@ -145,7 +145,11 @@ def run(
     - um fluxo customizado via JSON.
     """
     ui = UI()
-    audit_logger = get_audit_logger()
+    try:
+        audit_logger = get_audit_logger()
+    except ValueError as exc:
+        ui.show_error(f"Configuração inválida de logging: {exc}")
+        raise typer.Exit(code=1)
     log_event(
         audit_logger,
         "main.run.invoked",
@@ -283,28 +287,76 @@ def doctor(
     Diagnostica pré-requisitos de binários para o fluxo atual.
     """
     try:
+        audit_logger = get_audit_logger()
+    except ValueError as exc:
+        typer.echo(f"Configuração inválida de logging: {exc}")
+        raise typer.Exit(code=1)
+
+    log_event(
+        audit_logger,
+        "main.doctor.invoked",
+        level=logging.INFO,
+        flow_config_arg=flow_config or "",
+    )
+
+    try:
         resolved_config = resolve_flow_config(flow_config)
         flow_steps = load_flow_steps(flow_config, resolved_config=resolved_config)
     except ConfigError as exc:
+        log_event(
+            audit_logger,
+            "main.doctor.invalid_flow_config",
+            level=logging.ERROR,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         typer.echo(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
     statuses = evaluate_flow_prerequisites(flow_steps)
     missing = find_missing_binaries(statuses)
+    world_writable = find_world_writable_binary_locations(statuses)
 
     typer.echo(f"Fonte do fluxo: {_describe_resolved_flow_source(resolved_config)}")
     if not statuses:
+        log_event(
+            audit_logger,
+            "main.doctor.no_commands",
+            level=logging.INFO,
+            flow_source=resolved_config.source,
+        )
         typer.echo("Nenhum comando encontrado no fluxo.")
         return
 
     for status in statuses:
         typer.echo(_render_doctor_status_line(status))
 
+    if world_writable:
+        log_event(
+            audit_logger,
+            "main.doctor.world_writable_warning",
+            level=logging.WARNING,
+            risky_binaries=sorted(status.binary for status in world_writable),
+        )
+
     if missing:
         missing_bins = ", ".join(sorted(status.binary for status in missing))
+        log_event(
+            audit_logger,
+            "main.doctor.prerequisites_missing",
+            level=logging.ERROR,
+            missing_binaries=sorted(status.binary for status in missing),
+            total_binaries=len(statuses),
+        )
         typer.echo(f"Pré-requisitos ausentes no PATH: {missing_bins}.")
         raise typer.Exit(code=1)
 
+    log_event(
+        audit_logger,
+        "main.doctor.success",
+        level=logging.INFO,
+        total_binaries=len(statuses),
+    )
     typer.echo("Pré-requisitos atendidos.")
 
 
@@ -334,6 +386,20 @@ def tui(
     """
     Inicia a interface TUI (Textual) do Council.
     """
+    try:
+        audit_logger = get_audit_logger()
+    except ValueError as exc:
+        typer.echo(f"Configuração inválida de logging: {exc}")
+        raise typer.Exit(code=1)
+
+    log_event(
+        audit_logger,
+        "main.tui.invoked",
+        level=logging.INFO,
+        flow_config_arg=flow_config or "",
+        has_initial_prompt=bool(prompt),
+    )
+
     try:
         from council.tui import run_tui
     except ModuleNotFoundError as exc:
