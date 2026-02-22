@@ -10,14 +10,24 @@ from council.orchestrator import Orchestrator
 from council.config import (
     ConfigError,
     FLOW_CONFIG_ENV_VAR,
+    FLOW_CONFIG_SOURCE_CLI,
     FLOW_CONFIG_SOURCE_CWD,
+    FLOW_CONFIG_SOURCE_DEFAULT,
     FLOW_CONFIG_SOURCE_ENV,
+    FLOW_CONFIG_SOURCE_USER,
+    FlowStep,
     ResolvedFlowConfig,
     load_flow_steps,
     resolve_flow_config,
 )
 from council.history_store import HistoryStore
 from council.paths import get_tui_state_file_path
+from council.prerequisites import (
+    BinaryPrerequisiteStatus,
+    evaluate_flow_prerequisites,
+    find_missing_binaries,
+    find_world_writable_binary_locations,
+)
 from council.tui_state import TUIStateCryptoError, clear_tui_prompt_history, read_tui_state_passphrase
 
 app = typer.Typer(
@@ -58,6 +68,57 @@ def _confirm_implicit_flow_execution(resolved_config: ResolvedFlowConfig) -> boo
         default=False,
         show_default=True,
     )
+
+
+def _ensure_flow_prerequisites(flow_steps: list[FlowStep], ui: UI) -> bool:
+    statuses = evaluate_flow_prerequisites(flow_steps)
+    missing = find_missing_binaries(statuses)
+    if missing:
+        missing_bins = ", ".join(sorted(status.binary for status in missing))
+        ui.show_error(
+            (
+                "Pré-requisitos ausentes no PATH para executar o fluxo: "
+                f"{missing_bins}. Execute 'council doctor' para diagnóstico."
+            )
+        )
+        return False
+
+    for status in find_world_writable_binary_locations(statuses):
+        resolved_path = status.resolved_path or status.binary
+        ui.console.print(
+            (
+                "[yellow]Aviso de segurança: binário resolvido em diretório gravável por outros "
+                f"usuários: {resolved_path}[/yellow]"
+            )
+        )
+
+    return True
+
+
+def _describe_resolved_flow_source(resolved_config: ResolvedFlowConfig) -> str:
+    if resolved_config.source == FLOW_CONFIG_SOURCE_CLI and resolved_config.path is not None:
+        return f"--flow-config ({resolved_config.path})"
+    if resolved_config.source == FLOW_CONFIG_SOURCE_ENV and resolved_config.path is not None:
+        return f"{FLOW_CONFIG_ENV_VAR} ({resolved_config.path})"
+    if resolved_config.source == FLOW_CONFIG_SOURCE_CWD and resolved_config.path is not None:
+        return f"./flow.json ({resolved_config.path})"
+    if resolved_config.source == FLOW_CONFIG_SOURCE_USER and resolved_config.path is not None:
+        return f"configuração do usuário ({resolved_config.path})"
+    if resolved_config.source == FLOW_CONFIG_SOURCE_DEFAULT:
+        return "default interno"
+    if resolved_config.path is not None:
+        return f"{resolved_config.source} ({resolved_config.path})"
+    return resolved_config.source
+
+
+def _render_doctor_status_line(status: BinaryPrerequisiteStatus) -> str:
+    if not status.is_available:
+        return f"[MISSING] {status.binary}: não encontrado no PATH"
+
+    resolved_path = status.resolved_path or "(caminho desconhecido)"
+    if status.is_world_writable_location:
+        return f"[WARN] {status.binary}: {resolved_path} (diretório gravável por outros usuários)"
+    return f"[OK] {status.binary}: {resolved_path}"
 
 
 @app.command()
@@ -115,6 +176,9 @@ def run(
         ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
         raise typer.Exit(code=1)
 
+    if not _ensure_flow_prerequisites(flow_steps, ui):
+        raise typer.Exit(code=1)
+
     history_store: HistoryStore | None = None
     try:
         history_store = HistoryStore()
@@ -132,6 +196,51 @@ def run(
         flow_config_source=resolved_config.source,
     )
     orchestrator.run_flow(prompt)
+
+
+@app.command()
+def doctor(
+    flow_config: Annotated[
+        Optional[str],
+        typer.Option(
+            "--flow-config",
+            "-c",
+            help=(
+                "Caminho para JSON com a definição de passos a validar. "
+                f"Se omitido: {FLOW_CONFIG_ENV_VAR} -> ./flow.json -> "
+                "~/.config/council/flow.json -> default interno."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """
+    Diagnostica pré-requisitos de binários para o fluxo atual.
+    """
+    try:
+        resolved_config = resolve_flow_config(flow_config)
+        flow_steps = load_flow_steps(flow_config, resolved_config=resolved_config)
+    except ConfigError as exc:
+        typer.echo(f"Erro ao carregar configuração do fluxo: {exc}")
+        raise typer.Exit(code=1)
+
+    statuses = evaluate_flow_prerequisites(flow_steps)
+    missing = find_missing_binaries(statuses)
+
+    typer.echo(f"Fonte do fluxo: {_describe_resolved_flow_source(resolved_config)}")
+    if not statuses:
+        typer.echo("Nenhum comando encontrado no fluxo.")
+        return
+
+    for status in statuses:
+        typer.echo(_render_doctor_status_line(status))
+
+    if missing:
+        missing_bins = ", ".join(sorted(status.binary for status in missing))
+        typer.echo(f"Pré-requisitos ausentes no PATH: {missing_bins}.")
+        raise typer.Exit(code=1)
+
+    typer.echo("Pré-requisitos atendidos.")
+
 
 @app.command()
 def tui(
