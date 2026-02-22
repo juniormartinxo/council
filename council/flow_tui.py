@@ -525,6 +525,7 @@ class FlowConfigApp(App[None]):
              # Serializa manual para manter controle do formato
              payload = {"steps": []}
              for s in self.steps:
+                 normalized_input_template = s.input_template.strip() or DEFAULT_INPUT_TEMPLATE
                  d = {
                      "key": s.key,
                      "agent_name": s.agent_name,
@@ -532,8 +533,8 @@ class FlowConfigApp(App[None]):
                      "command": s.command,
                      "instruction": s.instruction,
                  }
-                 if s.input_template != DEFAULT_INPUT_TEMPLATE:
-                     d["input_template"] = s.input_template
+                 if normalized_input_template != DEFAULT_INPUT_TEMPLATE:
+                     d["input_template"] = normalized_input_template
                  if s.style != "blue":
                      d["style"] = s.style
                  if s.is_code:
@@ -552,7 +553,7 @@ class FlowConfigApp(App[None]):
              # Grava de forma formatada
              with open(self.config_path, "w", encoding="utf-8") as f:
                  json.dump(payload, f, indent=2, ensure_ascii=False)
-                 f.write("\\n") # EOF newline normal em editores
+                 f.write("\n") # EOF newline normal em editores
                  
              self.sub_title = str(self.config_path)
              self.notify(f"Salvo em {self.config_path}", severity="information")
