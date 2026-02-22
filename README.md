@@ -15,6 +15,7 @@ Este projeto é um laboratório prático de **Engenharia de Software e Arquitetu
 O fluxo de agentes é **configurável por arquivo JSON**, permitindo que cada time defina qual IA assume cada papel (planejamento, crítica, implementação, revisão etc.) sem editar o código-fonte.
 
 Guia para contribuir com o projeto: `CONTRIBUTING.md`.
+Guia completo de instalação e operação (setup end-to-end): `docs/SETUP.md`.
 
 ## 🧠 Soluções de Engenharia e Arquitetura
 
