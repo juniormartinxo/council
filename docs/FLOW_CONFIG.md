@@ -79,7 +79,7 @@ Exemplo com `steps`:
 - `agent_name` (obrigatório): nome exibido na UI.
 - `role_desc` (obrigatório): descrição do papel exibida na UI.
 - `command` (obrigatório): comando CLI da IA/ferramenta.
-  - Segurança: o primeiro token precisa existir no `PATH`; quebras de linha (`\n`, `\r`) e operadores de shell (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`) são bloqueados.
+  - Segurança: o primeiro token precisa existir no `PATH`, estar na allowlist (`claude`, `gemini`, `codex`, `ollama`) e não pode usar caminho explícito de binário (ex.: `/usr/bin/codex`); quebras de linha (`\n`, `\r`) e operadores de shell (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`) são bloqueados.
 - `instruction` (obrigatório): instrução principal do passo.
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
@@ -144,8 +144,10 @@ O carregamento falha com erro claro quando:
 8. A `key` usa nome reservado: `user_prompt`, `full_context`, `last_output`, `instruction`.
 9. O `input_template` referencia placeholder inexistente.
 10. O `command` usa binário inexistente no `PATH`.
-11. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
-12. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
+11. O `command` usa binário fora da allowlist (`claude`, `gemini`, `codex`, `ollama`).
+12. O `command` usa caminho explícito no primeiro token (ex.: `/usr/bin/codex`).
+13. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
+14. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
 
 ## 6.1 Limites Globais por Ambiente
 
