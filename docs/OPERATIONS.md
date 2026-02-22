@@ -71,6 +71,15 @@ Inspeção rápida de runs persistidos no SQLite local:
 council history runs --limit 20
 ```
 
+Diagnóstico de pré-requisitos de binários para o fluxo:
+
+```bash
+council doctor
+
+# Validando um fluxo específico
+council doctor --flow-config flow.example.json
+```
+
 Criptografia at-rest opcional do histórico de prompts:
 
 ```bash
@@ -93,6 +102,9 @@ Persistência estruturada do pipeline:
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
 Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
 
+O `council run` e a TUI validam automaticamente os binários exigidos pelo fluxo no `$PATH` antes da execução.
+Para diagnóstico explícito de pré-requisitos e caminhos resolvidos, use `council doctor`.
+
 Para debugar a anomalia fora da esteira:
 - `claude -p "teste debug"`
 - `gemini -p "teste debug"`
@@ -107,7 +119,7 @@ Cada passo aceita, entre outros campos:
 - `key`: identificador do resultado para ser reutilizado em passos seguintes.
 - `agent_name` / `role_desc`: rótulos exibidos na UI.
 - `command`: CLI real que será executada (ex: `claude -p`, `gemini -p {input}`, `codex exec --skip-git-repo-check`).
-  - Validacao de seguranca no parse: o binario deve existir no `PATH`; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
+  - Validacao de seguranca no parse: o binario deve existir no `PATH`, estar na allowlist (`claude`, `gemini`, `codex`, `ollama`) e nao pode usar caminho explicito; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
 - `instruction`: instrução principal do papel.
 - `input_template`: template com variáveis (`{user_prompt}`, `{full_context}`, `{last_output}` e `{key}` de passos anteriores).
 
