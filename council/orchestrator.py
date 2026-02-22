@@ -1,6 +1,8 @@
 import re
+import logging
 from time import perf_counter
 
+from council.audit_log import get_audit_logger, log_event
 from council.state import CouncilState
 from council.executor import Executor, CommandError, ExecutionAborted
 from council.ui import UI
@@ -36,9 +38,19 @@ class Orchestrator:
         self._step_sequence = 0
         self._executed_steps = 0
         self._successful_steps = 0
+        self._audit_logger = get_audit_logger()
 
     def run_flow(self, user_prompt: str):
         """Dispara todas as etapas (Planejamento, Crítica, Consolidação, Impl. e Revisão)"""
+        log_event(
+            self._audit_logger,
+            "orchestrator.flow.start",
+            level=logging.INFO,
+            prompt_chars=len(user_prompt),
+            planned_steps=len(self.flow_steps),
+            flow_config_source=self.flow_config_source or "default",
+            flow_config_path=self.flow_config_path,
+        )
         self.state.add_turn("Human", "user", user_prompt, "Requisito Inicial")
         self.ui.show_panel("Request (User)", user_prompt, style="cyan")
         self._step_sequence = 0
@@ -92,21 +104,58 @@ class Orchestrator:
                 last_output = result
             
             self.ui.show_success("Orquestração multimodelo do Council finalizada com sucesso!")
+            log_event(
+                self._audit_logger,
+                "orchestrator.flow.completed",
+                level=logging.INFO,
+                status="success",
+                executed_steps=self._executed_steps,
+                successful_steps=self._successful_steps,
+            )
 
         except ExecutionAborted:
             flow_status = "aborted"
             flow_error_message = "Fluxo abortado pelo usuário."
             self.ui.show_error("Fluxo abortado pelo usuário.")
+            log_event(
+                self._audit_logger,
+                "orchestrator.flow.aborted",
+                level=logging.INFO,
+                error=flow_error_message,
+            )
         except CommandError:
             flow_status = "error"
             flow_error_message = "Falha de execução em um ou mais passos."
             self.ui.show_error("O fluxo foi interrompido e etapas subsequentes foram abortadas.")
+            log_event(
+                self._audit_logger,
+                "orchestrator.flow.error",
+                level=logging.ERROR,
+                error=flow_error_message,
+            )
         except ConfigError as exc:
             flow_status = "error"
             flow_error_message = f"Configuração inválida do fluxo: {exc}"
             self.ui.show_error(f"Configuração inválida do fluxo: {exc}")
+            log_event(
+                self._audit_logger,
+                "orchestrator.flow.error",
+                level=logging.ERROR,
+                error=flow_error_message,
+                error_type=type(exc).__name__,
+            )
         finally:
             run_duration_ms = int((perf_counter() - run_started_perf) * 1000)
+            log_event(
+                self._audit_logger,
+                "orchestrator.flow.finish",
+                level=logging.INFO if flow_status in {"success", "aborted"} else logging.ERROR,
+                status=flow_status,
+                error=flow_error_message,
+                duration_ms=run_duration_ms,
+                executed_steps=self._executed_steps,
+                successful_steps=self._successful_steps,
+            )
             self._close_history_run(
                 status=flow_status,
                 error_message=flow_error_message,
@@ -141,6 +190,22 @@ class Orchestrator:
             set_active_step(step_key=step_key, label=f"{agent_name} ({role_desc})")
 
         self.ui.console.print(f"\nIniciando passo: {agent_name} ({role_desc})")
+        log_event(
+            self._audit_logger,
+            "orchestrator.step.start",
+            level=logging.INFO,
+            sequence=sequence,
+            step_key=step_key,
+            agent_name=agent_name,
+            role_desc=role_desc,
+            command=command,
+            timeout_seconds=timeout,
+            max_input_chars=max_input_chars,
+            max_output_chars=max_output_chars,
+            max_context_chars=max_context_chars,
+            is_feedback=is_feedback,
+            input_chars=len(input_data),
+        )
 
         try:
             with self.ui.live_stream(f"Processando {agent_name}...", style=style) as update_cb:
@@ -198,6 +263,20 @@ class Orchestrator:
                 started_at_utc=step_started_utc,
                 finished_at_utc=step_finished_utc,
                 duration_ms=step_duration_ms,
+            )
+            log_event(
+                self._audit_logger,
+                "orchestrator.step.finish",
+                level=logging.INFO if step_status in {"success", "aborted"} else logging.ERROR,
+                sequence=sequence,
+                step_key=step_key,
+                agent_name=agent_name,
+                role_desc=role_desc,
+                status=step_status,
+                error=step_error_message,
+                duration_ms=step_duration_ms,
+                output_chars=len(result),
+                is_feedback=is_feedback,
             )
 
     def _collect_human_feedback_loop(self, step: FlowStep, current_output: str) -> str:
@@ -358,6 +437,14 @@ class Orchestrator:
             return callback()
         except Exception as exc:  # pragma: no cover - comportamento defensivo
             self._history_store_available = False
+            log_event(
+                self._audit_logger,
+                "orchestrator.history_store.unavailable",
+                level=logging.ERROR,
+                operation=operation_label,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             if not self._history_store_warning_emitted:
                 self._history_store_warning_emitted = True
                 self.ui.show_error(
