@@ -148,15 +148,16 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
     about_model = _extract_model_from_output(about_output)
     about_tier = _extract_tier_from_output(about_output)
     if about_model is None or about_tier is None:
-        about_probe_attempt = _run_probe_command(
-            ["gemini", "-p", "/about", "--output-format", "text"],
+        about_probe_attempt = _run_gemini_non_interactive_probe_command(
+            "/about",
             timeout_seconds=timeout_seconds,
         )
-        about_output = _join_outputs(about_output, about_probe_attempt.output)
-        if about_model is None:
-            about_model = _extract_model_from_output(about_output)
-        if about_tier is None:
-            about_tier = _extract_tier_from_output(about_output)
+        if about_probe_attempt is not None:
+            about_output = _join_outputs(about_output, about_probe_attempt.output)
+            if about_model is None:
+                about_model = _extract_model_from_output(about_output)
+            if about_tier is None:
+                about_tier = _extract_tier_from_output(about_output)
     about_entries = _parse_generic_entries(about_output)
     if about_entries:
         return ProviderRateLimitProbeResult(
@@ -169,7 +170,8 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
         )
 
     stats_attempt = _run_gemini_repl_command("/stats", timeout_seconds=timeout_seconds)
-    stats_entries = _parse_generic_entries(stats_attempt.output)
+    stats_output = stats_attempt.output
+    stats_entries = _parse_generic_entries(stats_output)
     if stats_entries:
         return ProviderRateLimitProbeResult(
             binary="gemini",
@@ -179,6 +181,22 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
             source=_format_command(stats_attempt.command),
             model=_extract_model_from_output(stats_attempt.output) or about_model,
         )
+    stats_probe_attempt = _run_gemini_non_interactive_probe_command(
+        "/stats",
+        timeout_seconds=timeout_seconds,
+    )
+    if stats_probe_attempt is not None:
+        stats_output = _join_outputs(stats_output, stats_probe_attempt.output)
+        stats_entries = _parse_generic_entries(stats_output)
+        if stats_entries:
+            return ProviderRateLimitProbeResult(
+                binary="gemini",
+                status="ok",
+                summary=_entries_summary(stats_entries),
+                entries=stats_entries,
+                source=_format_command(stats_probe_attempt.command),
+                model=_extract_model_from_output(stats_output) or about_model,
+            )
 
     about_details: list[str] = []
     if about_model:
@@ -186,13 +204,13 @@ def _probe_gemini(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
     if about_tier:
         about_details.append(f"tier {about_tier}")
     about_suffix = f"; /about: {', '.join(about_details)}" if about_details else ""
-    source_attempt = stats_attempt
+    source_attempt = stats_probe_attempt or stats_attempt
     return ProviderRateLimitProbeResult(
         binary="gemini",
         status="unavailable",
         summary=(
             "sem indicador de cota restante via CLI; use /stats para uso da sessão "
-            f"({_attempt_reason(stats_attempt)}){about_suffix}"
+            f"({_attempt_reason(source_attempt)}){about_suffix}"
         ),
         entries=(),
         source=_format_command(source_attempt.command) if source_attempt is not None else None,
@@ -210,6 +228,34 @@ def _probe_claude_model(*, timeout_seconds: int) -> str | None:
         if model:
             return model
     return None
+
+
+def _run_gemini_non_interactive_probe_command(
+    slash_command: str,
+    *,
+    timeout_seconds: int,
+) -> _CommandAttemptResult | None:
+    normalized_command = slash_command if slash_command.startswith("/") else f"/{slash_command}"
+    plain_command = normalized_command.lstrip("/")
+    candidates = (
+        ["gemini", normalized_command],
+        ["gemini", plain_command],
+        ["gemini", "-p", normalized_command, "--output-format", "text"],
+    )
+    probe_timeout = max(5, min(timeout_seconds, 15))
+    last_attempt: _CommandAttemptResult | None = None
+
+    for command in candidates:
+        attempt = _run_probe_command(command, timeout_seconds=probe_timeout)
+        last_attempt = attempt
+        if attempt.output.strip():
+            return attempt
+        if attempt.error:
+            error_text = attempt.error.lower()
+            if "not found" in error_text or "not executable" in error_text:
+                return attempt
+
+    return last_attempt
 
 
 def _run_gemini_repl_command(slash_command: str, *, timeout_seconds: int) -> _CommandAttemptResult:
