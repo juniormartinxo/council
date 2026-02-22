@@ -25,6 +25,11 @@ from council.executor import CommandError, ExecutionAborted, Executor
 from council.history_store import HistoryStore
 from council.orchestrator import Orchestrator
 from council.paths import get_council_home, get_tui_state_file_path
+from council.prerequisites import (
+    evaluate_flow_prerequisites,
+    find_missing_binaries,
+    find_world_writable_binary_locations,
+)
 from council.state import CouncilState
 from council.tui_state import (
     TUIStateCryptoError,
@@ -984,6 +989,34 @@ class CouncilTextualApp(App[None]):
             ui.show_error(f"Erro ao carregar configuração do fluxo: {exc}")
             self._dispatch_ui(self._set_running, False)
             return
+
+        prerequisite_statuses = evaluate_flow_prerequisites(flow_steps)
+        missing_binaries = find_missing_binaries(prerequisite_statuses)
+        if missing_binaries:
+            missing_bins_text = ", ".join(sorted(status.binary for status in missing_binaries))
+            ui.show_error(
+                (
+                    "Pré-requisitos ausentes no PATH para executar o fluxo: "
+                    f"{missing_bins_text}. Execute 'council doctor' para diagnóstico."
+                )
+            )
+            self._dispatch_ui(self._set_running, False)
+            return
+
+        risky_binary_locations = find_world_writable_binary_locations(prerequisite_statuses)
+        if risky_binary_locations:
+            details = ", ".join(
+                f"{status.binary} ({status.resolved_path or 'caminho desconhecido'})"
+                for status in risky_binary_locations
+            )
+            self._dispatch_ui(
+                self._set_status,
+                (
+                    "Aviso de segurança: binários resolvidos em diretório gravável por outros "
+                    f"usuários: {details}"
+                ),
+                "yellow",
+            )
 
         history_store: HistoryStore | None = None
         try:
