@@ -13,6 +13,9 @@ A base de código do Council adere estritamente à ideia de _Single Responsibili
 - `ui.py` -> **Camada de Apresentação / View** (Isolamento total dos prints baseados no Rich).
 - `tui.py` -> **Camada de Apresentação Interativa** (Textual App + adaptador para reaproveitar Orchestrator/Executor).
 - `state.py` -> **Repositório em Memória / Entidade** (Armazena a evolução do contexto do agente).
+- `history_store.py` -> **Persistência Estruturada Local** (SQLite de runs e steps).
+- `audit_log.py` -> **Auditoria Operacional** (logger estruturado com hardening de permissões, fail-fast de configuração e rotação local).
+- `limits.py` -> **Política de Limites por Ambiente** (leitura validada de variáveis de limite).
 
 O acoplamento é injetado (via Dependency Injection) na porta de entrada da aplicação, garantindo que o módulo abstrator de orquestração não dependa de instâncias auto-criadas de Infra ou Visualização.
 
@@ -63,3 +66,11 @@ Para garantir orquestração fluida em rotinas invisíveis, o orquestrador impõ
 - Codex: Invoca-se através de `codex exec --skip-git-repo-check` para desviar da interface TUI/Menu e anular a validação forçada sobre o repositório Git subjacente.
 - Claude: Adicionado o modo _print_ `-p` estritamente para não invocar prompt de aprovação interativo.
 - Gemini: no caso `gemini -p`/`--prompt` sem valor explícito, o `executor.py` detecta o padrão e injeta o payload via `argv` em bloco delimitado (`===COUNCIL_INPUT_ARGV_START===`/`===COUNCIL_INPUT_ARGV_END===`), mantendo execução com `subprocess.Popen(..., shell=False)`.
+
+## 6. Auditoria Estruturada e Fail-Fast de Configuração
+
+O Council adota auditoria estruturada como preocupação transversal do runtime:
+- eventos de `run`, `tui`, `doctor`, execução de comandos e passos de orquestração são emitidos em `COUNCIL_HOME/council.log`;
+- o logger usa JSON por linha com `timestamp_utc`, `level`, `event` e `data`;
+- `COUNCIL_LOG_LEVEL`, `COUNCIL_LOG_MAX_BYTES` e `COUNCIL_LOG_BACKUP_COUNT` usam validação explícita e falham na inicialização quando inválidos;
+- rotação local por tamanho evita crescimento indefinido do arquivo de log em execuções intensivas.
