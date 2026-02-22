@@ -1,3 +1,4 @@
+import json
 import os
 import stat
 from pathlib import Path
@@ -8,6 +9,7 @@ import council.tui as tui_module
 from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, ResolvedFlowConfig
 from council.paths import COUNCIL_HOME_ENV_VAR
 from council.tui import CouncilTextualApp
+from council.tui_state import TUI_STATE_PASSPHRASE_ENV_VAR
 
 
 def _build_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[CouncilTextualApp, Path]:
@@ -183,3 +185,55 @@ def test_run_council_flow_handles_invalid_runtime_limits(
 
     assert any("Configuração inválida de limites" in message for message, _ in statuses)
     assert ("running=False", "state") in statuses
+
+
+def test_persist_state_with_passphrase_does_not_store_sensitive_plaintext(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, council_home = _build_app(tmp_path, monkeypatch)
+    monkeypatch.setenv(TUI_STATE_PASSPHRASE_ENV_VAR, "senha-super-secreta")
+    state_path = council_home / "tui_state.json"
+
+    app._prompt_history = ["senha de produção"]
+    app._persist_state(last_prompt="token secreto", last_flow_config="flow.example.json")
+
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted.get("last_prompt") != "token secreto"
+    assert persisted.get("prompt_history") != ["senha de produção"]
+    assert persisted["last_flow_config"] == "flow.example.json"
+    assert (
+        "encrypted_prompt_state" in persisted
+        or persisted.get("prompt_history") == []
+    )
+
+
+def test_load_persisted_state_preserves_last_flow_config_when_decryption_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    council_home = tmp_path / ".council-home"
+    state_path = council_home / "tui_state.json"
+    council_home.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_flow_config": "flow.secreto.json",
+                "encrypted_prompt_state": {
+                    "version": 1,
+                    "kdf": "pbkdf2-sha256",
+                    "iterations": 390000,
+                    "salt": "invalid",
+                    "token": "invalid",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(council_home))
+    monkeypatch.setenv(TUI_STATE_PASSPHRASE_ENV_VAR, "senha")
+    monkeypatch.setattr(CouncilTextualApp, "STATE_FILE_PATH", state_path)
+
+    app = CouncilTextualApp()
+
+    assert app._initial_flow_config == "flow.secreto.json"
+    assert app._prompt_history == []
+    assert app._state_warning is not None
