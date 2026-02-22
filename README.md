@@ -166,7 +166,8 @@ council history runs --limit 20
 
 - O Council registra eventos de execução em `COUNCIL_HOME/council.log` com timestamp, nível e payload estruturado.
 - O arquivo de log usa permissão `0o600` e `COUNCIL_HOME` é endurecido para `0o700` quando suportado pelo host.
-- O nível mínimo de log é configurável por `COUNCIL_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
+- O nível mínimo de log é configurável por `COUNCIL_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). Valor inválido falha explicitamente.
+- Rotação por tamanho disponível via `COUNCIL_LOG_MAX_BYTES` (default `5242880`) e `COUNCIL_LOG_BACKUP_COUNT` (default `5`).
 
 ## 📦 Instalação Global (recomendada)
 
