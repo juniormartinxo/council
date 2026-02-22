@@ -82,6 +82,9 @@ _ROLE_DESC_SUGGESTIONS: tuple[tuple[str, str], ...] = (
     ("Revisão", "Revisa qualidade e regressões."),
     ("Segurança", "Foca em hardening e ameaças."),
 )
+_SIMPLE_ACTION_HELP = (
+    "editar (e), adicionar (a), remover (r), mover (m), salvar (s), sair (q)"
+)
 
 
 @app.callback()
@@ -557,6 +560,27 @@ def _prompt_role_desc(current_value: str, console: Console) -> str:
             )
 
 
+def _resolve_simple_editor_action(raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    action_aliases = {
+        "e": "e",
+        "editar": "e",
+        "a": "a",
+        "adicionar": "a",
+        "r": "r",
+        "remover": "r",
+        "m": "m",
+        "mover": "m",
+        "s": "s",
+        "salvar": "s",
+        "q": "q",
+        "sair": "q",
+    }
+    if normalized in action_aliases:
+        return action_aliases[normalized]
+    raise ValueError("Ação inválida")
+
+
 def _prompt_step_form(step: FlowStep, index: int, console: Console) -> FlowStep:
     console.print("")
     console.print(
@@ -634,15 +658,25 @@ def _run_simple_flow_editor_session(
     console: Console,
 ) -> tuple[list[FlowStep], bool]:
     steps = list(initial_steps)
+    console.print(
+        Panel.fit(
+            f"Ações disponíveis: {_SIMPLE_ACTION_HELP}",
+            border_style="blue",
+        )
+    )
     while True:
         console.print("")
         console.print(_build_simple_flow_steps_table(steps))
-        action = Prompt.ask(
-            "Ação",
-            choices=["e", "a", "r", "m", "s", "q"],
-            default="s",
+        raw_action = Prompt.ask(
+            "Ação (editar/adicionar/remover/mover/salvar/sair)",
+            default="salvar",
             console=console,
-        ).strip().lower()
+        )
+        try:
+            action = _resolve_simple_editor_action(raw_action)
+        except ValueError:
+            console.print(f"[yellow]Ação inválida. Use: {_SIMPLE_ACTION_HELP}.[/yellow]")
+            continue
 
         if action == "e":
             index = _prompt_step_index(
@@ -711,7 +745,7 @@ def _run_simple_flow_editor_session(
                 return steps, False
             continue
 
-        console.print("[yellow]Ação inválida. Use: e, a, r, m, s ou q.[/yellow]")
+        console.print(f"[yellow]Ação inválida. Use: {_SIMPLE_ACTION_HELP}.[/yellow]")
 
 
 def _serialize_flow_steps(steps: list[FlowStep]) -> dict[str, list[dict[str, object]]]:
