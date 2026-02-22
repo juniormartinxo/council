@@ -10,7 +10,14 @@ O Council demanda um isolamento em **Virtual Environment** (venv/virtualenv), pr
 # Passos canônicos de bootstrap de desenvolvimento
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
+```
+
+Opcional com `direnv` para autoativar a `.venv` ao entrar no diretório:
+
+```bash
+direnv allow
+# opcional: cp .envrc.local.example .envrc.local
 ```
 
 > **Aviso Operacional:** Os binários externos essenciais que representam os atores subjacentes à arquitetura (`claude`, `gemini`, `codex`) precisam estar globais ($PATH do OS) ou disponíveis na sessão corrente, sendo invocáveis independentemente do Python.
