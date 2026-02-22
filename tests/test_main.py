@@ -525,6 +525,59 @@ def test_doctor_exits_when_logging_config_is_invalid(monkeypatch: pytest.MonkeyP
     assert "Configuração inválida de logging" in result.stdout
 
 
+def test_flow_edit_uses_simple_editor_when_selected(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_simple_editor(flow_path: Path | None) -> None:
+        captured["flow_path"] = flow_path
+
+    monkeypatch.setattr(main_module, "_run_flow_edit_simple", fake_simple_editor)
+    monkeypatch.setattr(main_module, "_run_flow_edit_tui", lambda _flow_path: None)
+
+    main_module.flow_edit(flow_config="flow.custom.json", editor="simple")
+
+    assert captured["flow_path"] == Path("flow.custom.json").expanduser()
+
+
+def test_flow_edit_uses_tui_editor_when_selected(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_tui_editor(flow_path: Path | None) -> None:
+        captured["flow_path"] = flow_path
+
+    monkeypatch.setattr(main_module, "_run_flow_edit_tui", fake_tui_editor)
+    monkeypatch.setattr(main_module, "_run_flow_edit_simple", lambda _flow_path: None)
+
+    main_module.flow_edit(flow_config="flow.custom.json", editor="tui")
+
+    assert captured["flow_path"] == Path("flow.custom.json").expanduser()
+
+
+def test_flow_edit_prompts_editor_choice_when_not_informed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    stdin_stub = type("StdInStub", (), {"isatty": lambda self: True})()
+
+    monkeypatch.setattr(main_module.sys, "stdin", stdin_stub)
+    monkeypatch.setattr(main_module.typer, "prompt", lambda *args, **kwargs: "simple")
+    monkeypatch.setattr(main_module, "_run_flow_edit_tui", lambda _flow_path: None)
+    monkeypatch.setattr(
+        main_module,
+        "_run_flow_edit_simple",
+        lambda flow_path: captured.update({"flow_path": flow_path}),
+    )
+
+    main_module.flow_edit(flow_config="flow.custom.json", editor=None)
+
+    assert captured["flow_path"] == Path("flow.custom.json").expanduser()
+
+
+def test_flow_edit_rejects_invalid_editor() -> None:
+    with pytest.raises(typer.BadParameter):
+        main_module.flow_edit(flow_config="flow.custom.json", editor="invalid")
+
+
 def test_flow_sign_command_reports_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
