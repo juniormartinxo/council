@@ -48,27 +48,42 @@ export COUNCIL_FLOW_CONFIG=flow.meu.json
 council run "Seu prompt"
 ```
 
-### 2.1 Interface Visual de Edição (TUI)
+### 2.1 Interfaces de Edição (`flow edit`)
 
-O Council possui um editor visual nativo no terminal baseado na biblioteca Textual para facilitar a criação e edição do `flow.json` sem precisar lidar com chaves e sintaxe JSON manualmente.
+O Council possui duas opções de editor no terminal para criação e manutenção do `flow.json`:
+
+1. `tui` (Textual): editor visual.
+2. `simple`: editor por prompts no terminal (sem TUI).
 
 Para abrir o editor:
 
 ```bash
-# Inicia edição num arquivo exisente (ou cria um novo se não existir)
+# Inicia edição num arquivo existente (ou cria um novo se não existir),
+# perguntando qual editor usar (tui/simple) em modo interativo.
 council flow edit flow.meu.json
 
-# Se não passar nada, o TUI inicializa com o template padrão 
-# e pedirá para você salvar o arquivo no disco (Save As)
+# Força editor visual (Textual)
+council flow edit flow.meu.json --editor tui
+
+# Força editor simples (prompt no terminal)
+council flow edit flow.meu.json --editor simple
+
+# Se não passar caminho, inicia com template padrão.
+# Ao salvar, o comando pede o destino do arquivo.
 council flow edit
 ```
 
-Na interface interativa, você pode:
+No editor TUI, você pode:
 - Adicionar ou remover passos visualmente.
 - Reordenar etapas do fluxo (Up/Down).
 - Ter validação inline do comando e campos críticos antes de salvar.
 
-> Quando você salva um fluxo existente pelo editor (Ctrl+S), se houver um arquivo de assinatura `.sig` correspondente, **ele será deletado automaticamente**, visto que a edição invalida a segurança criptográfica anterior. Você precisará assinar o arquivo novamente.
+No editor `simple`, você pode:
+- Listar passos atuais.
+- Editar, adicionar, remover e mover passos por índice.
+- Salvar no final, direto pelo terminal.
+
+> Quando você salva um fluxo por qualquer editor, se houver um arquivo de assinatura `.sig` correspondente, **ele será deletado automaticamente**, visto que a edição invalida a segurança criptográfica anterior. Você precisará assinar o arquivo novamente.
  
 ## 2.2 Assinatura de Integridade e Autoria (DEF-04)
 
