@@ -5,17 +5,32 @@ import logging
 import os
 import threading
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Mapping
 
+from council.limits import read_positive_int_env
 from council.paths import get_council_home, get_council_log_path
 
 
 COUNCIL_LOG_LEVEL_ENV_VAR = "COUNCIL_LOG_LEVEL"
+COUNCIL_LOG_MAX_BYTES_ENV_VAR = "COUNCIL_LOG_MAX_BYTES"
+COUNCIL_LOG_BACKUP_COUNT_ENV_VAR = "COUNCIL_LOG_BACKUP_COUNT"
 COUNCIL_LOG_FILE_NAME = "council.log"
 DEFAULT_LOG_LEVEL_NAME = "INFO"
+DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024
+DEFAULT_LOG_BACKUP_COUNT = 5
 LOGGER_NAME = "council.audit"
 MAX_FIELD_LENGTH = 500
+
+_VALID_LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "WARN": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
 
 
 _LOGGER_LOCK = threading.Lock()
@@ -38,6 +53,38 @@ class _AuditJsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+class _SecureRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler com criação/reestrição de permissão em modo 0o600."""
+
+    def _open(self):
+        def secure_opener(path: str, flags: int) -> int:
+            return os.open(path, flags, 0o600)
+
+        stream = open(
+            self.baseFilename,
+            self.mode,
+            encoding=self.encoding,
+            errors=self.errors,
+            opener=secure_opener,
+        )
+        self._secure_stream_permissions(stream)
+        return stream
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self.stream is not None:
+            self._secure_stream_permissions(self.stream)
+        super().emit(record)
+
+    def _secure_stream_permissions(self, stream) -> None:
+        fileno = getattr(stream, "fileno", None)
+        if not callable(fileno):
+            return
+        try:
+            os.fchmod(fileno(), 0o600)
+        except OSError:
+            pass
 
 
 def get_audit_logger() -> logging.Logger:
@@ -78,13 +125,20 @@ def _configure_logger(logger: logging.Logger) -> None:
     _clear_handlers(logger)
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
+    log_level = _resolve_log_level_from_env()
+    log_max_bytes, log_backup_count = _resolve_rotation_limits_from_env()
 
     try:
         home = get_council_home(create=True)
         _secure_directory_permissions(home)
         log_path = get_council_log_path()
-        file_handler = logging.FileHandler(log_path, encoding="utf-8")
-        file_handler.setLevel(_resolve_log_level_from_env())
+        file_handler = _SecureRotatingFileHandler(
+            log_path,
+            maxBytes=log_max_bytes,
+            backupCount=log_backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(log_level)
         file_handler.setFormatter(_AuditJsonFormatter())
         logger.addHandler(file_handler)
         _secure_file_permissions(log_path)
@@ -93,8 +147,24 @@ def _configure_logger(logger: logging.Logger) -> None:
 
 
 def _resolve_log_level_from_env() -> int:
-    raw_level = os.getenv(COUNCIL_LOG_LEVEL_ENV_VAR, DEFAULT_LOG_LEVEL_NAME).strip().upper()
-    return getattr(logging, raw_level, logging.INFO)
+    raw_level = os.getenv(COUNCIL_LOG_LEVEL_ENV_VAR, "").strip()
+    if not raw_level:
+        return _VALID_LOG_LEVELS[DEFAULT_LOG_LEVEL_NAME]
+
+    normalized_level = raw_level.upper()
+    if normalized_level not in _VALID_LOG_LEVELS:
+        valid_levels = ", ".join(sorted(_VALID_LOG_LEVELS))
+        raise ValueError(
+            f"Variável de ambiente '{COUNCIL_LOG_LEVEL_ENV_VAR}' inválida: "
+            f"recebido '{raw_level}'. Valores aceitos: {valid_levels}."
+        )
+    return _VALID_LOG_LEVELS[normalized_level]
+
+
+def _resolve_rotation_limits_from_env() -> tuple[int, int]:
+    max_bytes = read_positive_int_env(COUNCIL_LOG_MAX_BYTES_ENV_VAR, DEFAULT_LOG_MAX_BYTES)
+    backup_count = read_positive_int_env(COUNCIL_LOG_BACKUP_COUNT_ENV_VAR, DEFAULT_LOG_BACKUP_COUNT)
+    return max_bytes, backup_count
 
 
 def _sanitize_log_value(value: object) -> object:
