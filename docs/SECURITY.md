@@ -119,7 +119,7 @@ Se o disco for comprometido, o arquivo incluído em backups não criptografados,
 
 ---
 
-### SEC-04 — Indirect Prompt Injection entre agentes
+### SEC-04 — Indirect Prompt Injection entre agentes (✔️ Mitigado em 2026-02-22)
 
 **Localização:** `council/orchestrator.py` — `run_flow()`, montagem do `template_context`.
 
@@ -138,6 +138,26 @@ Adicionalmente, no caminho `_is_gemini_prompt_missing_value` (onde o output ante
 | Adicionar delimitadores explícitos nos templates entre instrução e dados. Ex: `===DADOS_DO_AGENTE_ANTERIOR===` / `===FIM_DADOS===`. | Baixo | Médio |
 | Garantir que `shlex.quote()` é aplicado em **todos** os caminhos de injeção de dados em comandos, não apenas nos que passam por `{input}`. | Médio | Alto |
 | Sanitizar outputs de LLMs removendo metacaracteres de shell antes da injeção em templates. | Médio | Alto |
+
+**Status atual (mitigado em 2026-02-22):**
+- Saídas de passos anteriores (`{last_output}` e `{<key_de_passo>}`) e o contexto agregado (`{full_context}`) passaram a ser encapsulados automaticamente em blocos delimitados:
+  - `===DADOS_DO_AGENTE_ANTERIOR===`
+  - `===FIM_DADOS_DO_AGENTE_ANTERIOR===`
+- O bloco inclui rótulo de origem e instrução explícita para tratar o conteúdo como dados de contexto não confiáveis.
+- O fluxo de ajuste humano (`_build_follow_up_input`) também passou a encapsular `RESPOSTA ANTERIOR` com os mesmos delimitadores.
+- A rota de injeção via `argv` (`{input}` e fallback `gemini -p` sem valor) agora delimita o payload com:
+  - `===COUNCIL_INPUT_ARGV_START===`
+  - `===COUNCIL_INPUT_ARGV_END===`
+- A sanitização de `source` foi endurecida para ASCII imprimível, removendo caracteres de controle e não-ASCII.
+- A documentação de placeholders foi atualizada em `docs/FLOW_CONFIG.md`.
+
+**Risco residual:**
+- A mitigação reduz o risco sem eliminá-lo completamente: LLMs ainda podem interpretar conteúdo malicioso dentro de blocos delimitados.
+- Templates customizados continuam dependentes de prompt design defensivo do operador para separar instruções de dados históricos.
+
+**Evidência:**
+- Código: `council/orchestrator.py`
+- Testes: `tests/test_orchestrator.py`
 
 ---
 
