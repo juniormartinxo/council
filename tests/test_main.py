@@ -16,6 +16,7 @@ from council.config import (
     FlowStep,
     ResolvedFlowConfig,
 )
+from council.flow_signature import FlowSignatureError
 from council.history_store import HistoryStore
 from council.paths import COUNCIL_HOME_ENV_VAR
 
@@ -372,3 +373,151 @@ def test_doctor_exits_when_logging_config_is_invalid(monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == 1
     assert "Configuração inválida de logging" in result.stdout
+
+
+def test_flow_sign_command_reports_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow_path = tmp_path / "flow.json"
+    private_key_path = tmp_path / "author.key.pem"
+    expected_signature_path = tmp_path / "flow.json.sig"
+    flow_path.write_text("[]", encoding="utf-8")
+    private_key_path.write_text("private", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_sign(
+        flow_path: Path,
+        private_key_path: Path,
+        key_id: str,
+        *,
+        signature_path: Path | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        captured["flow_path"] = flow_path
+        captured["private_key_path"] = private_key_path
+        captured["key_id"] = key_id
+        captured["signature_path"] = signature_path
+        captured["overwrite"] = overwrite
+        return signature_path or expected_signature_path
+
+    monkeypatch.setattr(main_module, "sign_flow_file", fake_sign)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main_module.app,
+        [
+            "flow",
+            "sign",
+            str(flow_path),
+            "--private-key",
+            str(private_key_path),
+            "--key-id",
+            "author-v1",
+            "--signature-file",
+            str(expected_signature_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["flow_path"] == flow_path
+    assert captured["private_key_path"] == private_key_path
+    assert captured["key_id"] == "author-v1"
+    assert captured["signature_path"] == expected_signature_path
+    assert "Assinatura criada" in result.stdout
+
+
+def test_flow_verify_command_reports_error_on_invalid_signature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow_path = tmp_path / "flow.json"
+    flow_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(
+        main_module,
+        "verify_flow_signature",
+        lambda **_kwargs: (_ for _ in ()).throw(FlowSignatureError("assinatura inválida")),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main_module.app, ["flow", "verify", str(flow_path)])
+
+    assert result.exit_code == 1
+    assert "Falha na verificação da assinatura" in result.stdout
+
+
+def test_flow_keygen_command_reports_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    trusted_path = Path("/tmp/council/trusted_flow_keys/author-v1.pem")
+
+    def fake_generate(
+        private_key_path: Path,
+        public_key_path: Path,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        captured["private_key_path"] = private_key_path
+        captured["public_key_path"] = public_key_path
+        captured["overwrite"] = overwrite
+
+    def fake_trust(
+        public_key_path: Path,
+        key_id: str,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        captured["trust_public_key_path"] = public_key_path
+        captured["trust_key_id"] = key_id
+        captured["trust_overwrite"] = overwrite
+        return trusted_path
+
+    monkeypatch.setattr(main_module, "generate_flow_signing_keypair", fake_generate)
+    monkeypatch.setattr(main_module, "trust_flow_public_key", fake_trust)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main_module.app,
+        ["flow", "keygen", "--key-id", "author-v1", "--trust"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["private_key_path"] == Path("author-v1.key.pem")
+    assert captured["public_key_path"] == Path("author-v1.pub.pem")
+    assert captured["trust_public_key_path"] == Path("author-v1.pub.pem")
+    assert captured["trust_key_id"] == "author-v1"
+    assert "Chave privada gerada em" in result.stdout
+    assert "Chave pública confiada em" in result.stdout
+
+
+def test_flow_trust_command_reports_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public_key_path = tmp_path / "author.pub.pem"
+    public_key_path.write_text("fake", encoding="utf-8")
+    captured: dict[str, object] = {}
+    trusted_path = Path("/tmp/council/trusted_flow_keys/author-v1.pem")
+
+    def fake_trust(
+        public_key_path: Path,
+        key_id: str,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        captured["public_key_path"] = public_key_path
+        captured["key_id"] = key_id
+        captured["overwrite"] = overwrite
+        return trusted_path
+
+    monkeypatch.setattr(main_module, "trust_flow_public_key", fake_trust)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        main_module.app,
+        ["flow", "trust", str(public_key_path), "--key-id", "author-v1"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["public_key_path"] == public_key_path
+    assert captured["key_id"] == "author-v1"
+    assert captured["overwrite"] is False
+    assert "Chave confiada com sucesso" in result.stdout
