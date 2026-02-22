@@ -36,6 +36,10 @@ def get_run_history_db_path() -> Path:
     return get_council_db_dir(create=False) / "history.sqlite3"
 
 
+def get_council_log_path() -> Path:
+    return get_council_home(create=False) / "council.log"
+
+
 def get_user_flow_config_path() -> Path:
     return get_council_home(create=False) / "flow.json"
 
