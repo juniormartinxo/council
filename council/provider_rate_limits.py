@@ -124,12 +124,16 @@ def _probe_claude(*, timeout_seconds: int) -> ProviderRateLimitProbeResult:
                 source=_format_command(attempt.command),
                 model=_extract_model_from_output(attempt.output) or cli_model,
             )
+        # If /usage timed out or errored, /cost tends to fail the same way in this environment.
+        if attempt.timed_out or attempt.error:
+            break
 
     return ProviderRateLimitProbeResult(
         binary="claude",
         status="unavailable",
         summary=(
-            "indisponível automaticamente; use /usage no Claude "
+            "indisponível automaticamente; use /usage na TUI do Claude "
+            "ou bunx ccusage "
             f"({_attempt_reason(last_attempt)})"
         ),
         entries=(),
