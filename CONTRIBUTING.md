@@ -20,7 +20,8 @@ Use Python 3.10+.
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
+direnv allow
 ```
 
 Comandos principais do projeto:
@@ -31,7 +32,7 @@ council run "Seu prompt" --flow-config flow.example.json
 council tui
 ```
 
-Para instalar localmente o binário durante o desenvolvimento:
+Para reinstalar localmente o binário durante o desenvolvimento:
 
 ```bash
 pip install -e .
