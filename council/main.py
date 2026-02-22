@@ -72,7 +72,7 @@ app.add_typer(history_app, name="history")
 app.add_typer(flow_app, name="flow")
 
 _SUPPORTED_PROVIDER_LIMIT_BINARIES = {"codex", "claude", "gemini"}
-_PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS = 8
+_PROVIDER_LIMIT_PROBE_TIMEOUT_SECONDS = 45
 _DEFAULT_INPUT_TEMPLATE = "{instruction}\n\n{full_context}"
 _ROLE_DESC_SUGGESTIONS: tuple[tuple[str, str], ...] = (
     ("Planejamento", "Define estratégia e arquitetura."),
