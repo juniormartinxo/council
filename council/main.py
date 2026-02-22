@@ -1052,21 +1052,23 @@ def doctor(
         )
         raise typer.Exit(code=1)
 
-    statuses = evaluate_flow_prerequisites(flow_steps)
-    missing = find_missing_binaries(statuses)
-    world_writable = find_world_writable_binary_locations(statuses)
     provider_rate_limits: dict[str, ProviderRateLimitProbeResult]
-    try:
-        provider_rate_limits = _resolve_provider_rate_limits(flow_steps)
-    except Exception as exc:
-        provider_rate_limits = {}
-        log_event(
-            audit_logger,
-            "main.doctor.provider_limit_probe_failed",
-            level=logging.WARNING,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
+    with console.status("[bold cyan]Verificando pré-requisitos do fluxo...", spinner="dots") as status:
+        statuses = evaluate_flow_prerequisites(flow_steps)
+        missing = find_missing_binaries(statuses)
+        world_writable = find_world_writable_binary_locations(statuses)
+        status.update("[bold cyan]Consultando cotas dos provedores...")
+        try:
+            provider_rate_limits = _resolve_provider_rate_limits(flow_steps)
+        except Exception as exc:
+            provider_rate_limits = {}
+            log_event(
+                audit_logger,
+                "main.doctor.provider_limit_probe_failed",
+                level=logging.WARNING,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     flow_source_description = _describe_resolved_flow_source(resolved_config)
     console.print(
