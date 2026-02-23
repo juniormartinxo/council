@@ -54,7 +54,7 @@ Cada passo define:
 
 O `input_template` suporta placeholders como `{user_prompt}`, `{full_context}`, `{last_output}` e qualquer `key` já produzido anteriormente (`{plan}`, `{code}`, etc.), permitindo que o dev decida qual IA assume cada papel sem alterar o core.
 
-No carregamento de `flow.json`, o `config.py` também aplica validação semântica do `command` antes da execução do passo: sintaxe shell válida, binário presente no `PATH`, binário na allowlist (`claude`, `gemini`, `codex`, `ollama`), bloqueio de caminho explícito no primeiro token e rejeição de operadores perigosos/quebras de linha.
+No carregamento de `flow.json`, o `config.py` também aplica validação semântica do `command` antes da execução do passo: sintaxe shell válida, primeiro token na allowlist (`claude`, `gemini`, `codex`, `ollama`, `deepseek`), bloqueio de caminho explícito no primeiro token e rejeição de operadores perigosos/quebras de linha. Para comandos CLI o binário precisa existir no `PATH`; `deepseek` é tratado como provider API-only.
 
 Para formato, exemplos e validações operacionais, consulte `FLOW_CONFIG.md`.
 
