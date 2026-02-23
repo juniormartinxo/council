@@ -4,6 +4,8 @@ import stat
 from pathlib import Path
 
 import pytest
+from rich.markdown import Markdown as RichMarkdown
+from rich.syntax import Syntax
 
 import council.tui as tui_module
 from council.config import FLOW_CONFIG_SOURCE_CWD, FLOW_CONFIG_SOURCE_ENV, FlowStep, ResolvedFlowConfig
@@ -18,6 +20,19 @@ def _build_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Council
     monkeypatch.setenv(COUNCIL_HOME_ENV_VAR, str(council_home))
     monkeypatch.setattr(CouncilTextualApp, "STATE_FILE_PATH", council_home / "tui_state.json")
     return CouncilTextualApp(), council_home
+
+
+class _StubRichLog:
+    def __init__(self) -> None:
+        self.writes: list[object] = []
+        self.clear_count = 0
+
+    def clear(self) -> None:
+        self.clear_count += 1
+        self.writes.clear()
+
+    def write(self, value: object) -> None:
+        self.writes.append(value)
 
 
 def test_save_clipboard_fallback_uses_council_home_and_secure_permissions(
@@ -276,3 +291,109 @@ def test_load_persisted_state_preserves_last_flow_config_when_decryption_fails(
     assert app._initial_flow_config == "flow.secreto.json"
     assert app._prompt_history == []
     assert app._state_warning is not None
+
+
+def test_add_result_panel_uses_markdown_renderable_for_non_code_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    result_log = _StubRichLog()
+    content = "# Resultado\n- item A"
+
+    monkeypatch.setattr(app, "_result_log", lambda: result_log)
+
+    app._add_result_panel(
+        title="Resumo",
+        content=content,
+        style="blue",
+        is_code=False,
+        language="python",
+    )
+
+    rendered = app._result_render_buffers[app.GENERAL_STEP_ID]
+    textual = app._result_text_buffers[app.GENERAL_STEP_ID]
+
+    assert rendered[0] == "=== Resumo ==="
+    assert isinstance(rendered[1], RichMarkdown)
+    assert textual == ["=== Resumo ===", content, ""]
+    assert isinstance(result_log.writes[1], RichMarkdown)
+
+
+def test_add_result_panel_keeps_syntax_for_code_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    result_log = _StubRichLog()
+    code = "print('ok')"
+
+    monkeypatch.setattr(app, "_result_log", lambda: result_log)
+
+    app._add_result_panel(
+        title="Código",
+        content=code,
+        style="blue",
+        is_code=True,
+        language="python",
+    )
+
+    rendered = app._result_render_buffers[app.GENERAL_STEP_ID]
+    textual = app._result_text_buffers[app.GENERAL_STEP_ID]
+
+    assert isinstance(rendered[1], Syntax)
+    assert textual[1] == code
+    assert isinstance(result_log.writes[1], Syntax)
+
+
+def test_copy_results_uses_plain_text_buffer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    captured: dict[str, str] = {}
+    selected_step = "step_impl"
+
+    app._result_selected_step_id = selected_step
+    app._step_labels[selected_step] = "Implementação"
+    app._result_render_buffers[selected_step] = [RichMarkdown("**não deve ser copiado**")]
+    app._result_text_buffers[selected_step] = ["linha 1", "linha 2"]
+
+    monkeypatch.setattr(
+        app,
+        "_copy_text_payload",
+        lambda payload, label, empty_message: captured.update(
+            {"payload": payload, "label": label, "empty_message": empty_message}
+        ),
+    )
+
+    app.action_copy_results()
+
+    assert captured["payload"] == "linha 1\nlinha 2"
+    assert captured["label"] == "resultados_Implementação"
+    assert captured["empty_message"] == "Resultados vazios para copiar."
+
+
+def test_refresh_result_log_replays_renderables_of_selected_tab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, _ = _build_app(tmp_path, monkeypatch)
+    result_log = _StubRichLog()
+    selected_step = "step_review"
+    renderables: list[object] = [
+        "=== Review ===",
+        RichMarkdown("**ok**"),
+        Syntax("x = 1", "python"),
+        "",
+    ]
+
+    app._result_render_buffers = {
+        app.GENERAL_STEP_ID: [],
+        selected_step: renderables,
+    }
+    app._result_selected_step_id = selected_step
+    monkeypatch.setattr(app, "_result_log", lambda: result_log)
+
+    app._refresh_result_log()
+
+    assert result_log.clear_count == 1
+    assert len(result_log.writes) == len(renderables)
+    for index, expected in enumerate(renderables):
+        assert result_log.writes[index] is expected
