@@ -11,7 +11,7 @@ O fluxo cobre:
 - inicialização do logger de auditoria e validação de env vars de logging;
 - orquestração passo a passo;
 - montagem de prompt com blocos de dados delimitados;
-- execução em subprocesso (`stdin` ou `argv`);
+- execução via subprocesso (`stdin`/`argv`) ou via API (`deepseek`);
 - streaming, histórico, auditoria e encerramento.
 
 ## 2. Diagrama Mermaid
@@ -32,17 +32,20 @@ flowchart TD
     K --> L["_step"]
     L --> M["executor.run_cli(command, input_data)"]
 
-    M --> N{"command contem placeholder input?"}
-    N -- "Sim" --> O["Encapsula payload e injeta no argv"]
-    N -- "Nao" --> P{"gemini prompt sem valor?"}
-    P -- "Sim" --> Q["Encapsula payload e anexa ao argv"]
-    P -- "Nao" --> R["Envia input_data via stdin"]
+    M --> N{"command inicia com deepseek?"}
+    N -- "Sim" --> DS["POST /chat/completions (DeepSeek API)"]
+    N -- "Nao" --> P{"command contem placeholder input?"}
+    P -- "Sim" --> O["Encapsula payload e injeta no argv"]
+    P -- "Nao" --> Q{"gemini prompt sem valor?"}
+    Q -- "Sim" --> R["Encapsula payload e anexa ao argv"]
+    Q -- "Nao" --> S["Envia input_data via stdin"]
 
-    O --> S["subprocess.Popen com shell false"]
-    Q --> S
-    R --> S
+    O --> SP["subprocess.Popen com shell false"]
+    R --> SP
+    S --> SP
 
-    S --> T["Streaming de stdout para UI + coleta de output + eventos de auditoria"]
+    DS --> T["Normaliza resposta/erro da API"]
+    SP --> T["Streaming de stdout para UI + coleta de output + eventos de auditoria"]
     T --> U{"Erro / timeout / abort?"}
     U -- "Sim" --> V["Registra erro, fecha run, encerra fluxo e audita status final"]
     U -- "Nao" --> W["state.add_turn assistant, show_panel, grava step no history e audita"]
@@ -57,7 +60,7 @@ flowchart TD
     AA --> AB["Exibe sucesso final"]
 ```
 
-## 3. Caminhos de Input no Executor
+## 3. Caminhos de Execução no Executor
 
 `Executor._prepare_command()` decide entre dois canais:
 
@@ -70,6 +73,13 @@ flowchart TD
 - o payload é delimitado com:
   - `===COUNCIL_INPUT_ARGV_START===`
   - `===COUNCIL_INPUT_ARGV_END===`
+
+3. API DeepSeek:
+- usado quando o comando inicia com `deepseek`;
+- o executor chama `POST {base_url}/chat/completions` com:
+  - `Authorization: Bearer <DEEPSEEK_API_KEY>`;
+  - payload `messages` contendo o `input_data` no papel `user`;
+- retorno é normalizado para texto antes de seguir para Orchestrator/UI.
 
 ## 4. Delimitação de Dados Entre Agentes
 
