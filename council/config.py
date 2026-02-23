@@ -38,7 +38,8 @@ DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r">>"), ">>"),
     (re.compile(r"(?<!>)>(?!>)"), ">"),
 )
-ALLOWED_COMMAND_BINARIES = frozenset({"claude", "gemini", "codex", "ollama"})
+ALLOWED_COMMAND_BINARIES = frozenset({"claude", "gemini", "codex", "ollama", "deepseek"})
+API_ONLY_COMMAND_BINARIES = frozenset({"deepseek"})
 _TEMPLATE_FORMATTER = Formatter()
 _TEMPLATE_FIELD_BASE_PATTERN = re.compile(r"[.\[]")
 
@@ -436,6 +437,9 @@ def _validate_command(command: str, step: int) -> None:
         raise ConfigError(
             f"O campo 'command' no passo #{step} deve usar apenas o nome do binário, sem caminho explícito: '{binary}'."
         )
+
+    if binary in API_ONLY_COMMAND_BINARIES:
+        return
 
     if shutil.which(binary) is None:
         raise ConfigError(
