@@ -13,9 +13,11 @@ Antes de instalar o Council, garanta:
 
 - `python` 3.10+ disponível no `PATH`;
 - `pipx` instalado;
-- CLIs de agentes usadas no seu `flow.json` instaladas e autenticadas no host.
+- providers do seu `flow.json` configurados:
+  - CLIs locais (`claude`, `gemini`, `codex`, `ollama`) instaladas/autenticadas no host, quando usadas;
+  - providers API (ex: `deepseek`) com variáveis de ambiente necessárias (`DEEPSEEK_API_KEY`).
 
-O fluxo default usa `claude`, `gemini` e `codex`. O parser também permite `ollama`.
+O fluxo default usa `claude`, `gemini` e `codex`. A allowlist atual também permite `ollama` e `deepseek`.
 
 Exemplo de instalação do `pipx`:
 
@@ -65,7 +67,7 @@ Comandos mínimos:
 # cria flow.json a partir do template interno (modo simples)
 council flow edit flow.json --editor simple
 
-# valida binários exigidos pelo fluxo
+# valida pré-requisitos exigidos pelo fluxo (CLI no PATH ou provider API)
 council doctor --flow-config flow.json
 
 # executa fluxo
@@ -96,7 +98,9 @@ council flow edit flow.json --editor simple
 cp flow.example.json flow.json
 ```
 
-Após criar, ajuste os comandos no campo `command` de cada passo para os binários existentes no seu host.
+Após criar, ajuste os comandos no campo `command` de cada passo para o provider desejado:
+- CLI local disponível no host (ex: `claude -p`, `gemini -p {input}`);
+- API provider (ex: `deepseek --model deepseek-chat`).
 
 ## 5. Assinatura de flow (keygen/sign/trust/verify)
 
@@ -184,6 +188,8 @@ Em modo não interativo (CI/pipeline), essa execução implícita é bloqueada. 
 | `COUNCIL_LOG_BACKUP_COUNT` | `5` | inteiro positivo | Quantidade de arquivos rotacionados (`.1`, `.2`, ...). |
 | `COUNCIL_TUI_STATE_PASSPHRASE` | vazio | string não vazia | Habilita criptografia de histórico de prompts da TUI. Tem precedência sobre arquivo de senha. |
 | `COUNCIL_TUI_STATE_PASSPHRASE_FILE` | vazio | caminho de arquivo legível | Fonte alternativa da senha da TUI. Usada quando `COUNCIL_TUI_STATE_PASSPHRASE` não está definido. |
+| `DEEPSEEK_API_KEY` | vazio | token válido da DeepSeek API | Obrigatória para executar passos com `command` iniciado por `deepseek`. |
+| `DEEPSEEK_API_BASE_URL` | `https://api.deepseek.com` | URL base HTTP(S) | Opcional para sobrescrever endpoint da API DeepSeek. |
 
 ### 7.2 Variáveis de ambiente do SO que influenciam caminhos
 
@@ -214,7 +220,7 @@ export COUNCIL_HOME="$PWD/.council-home"
 
 - `Configuração inválida de logging`: revise `COUNCIL_LOG_LEVEL`, `COUNCIL_LOG_MAX_BYTES`, `COUNCIL_LOG_BACKUP_COUNT`.
 - `Configuração inválida de limites`: revise `COUNCIL_MAX_CONTEXT_CHARS`, `COUNCIL_MAX_INPUT_CHARS`, `COUNCIL_MAX_OUTPUT_CHARS`.
-- `Pré-requisitos ausentes no PATH`: rode `council doctor --flow-config flow.json` e instale os binários faltantes.
+- `Pré-requisitos ausentes`: rode `council doctor --flow-config flow.json`; para CLIs faltantes, instale binários no `PATH`; para `deepseek`, valide `DEEPSEEK_API_KEY`.
 - `Execução bloqueada em modo não interativo`: passe `--flow-config` explicitamente.
 - `Falha na verificação da assinatura`: valide `flow.json.sig`, `key_id` e presença da chave pública no trust store.
 
