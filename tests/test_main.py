@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 import council.main as main_module
 from council.config import (
+    ConfigError,
     FLOW_CONFIG_SOURCE_CLI,
     FLOW_CONFIG_SOURCE_CWD,
     FLOW_CONFIG_SOURCE_DEFAULT,
@@ -576,6 +577,53 @@ def test_flow_edit_prompts_editor_choice_when_not_informed(
 def test_flow_edit_rejects_invalid_editor() -> None:
     with pytest.raises(typer.BadParameter):
         main_module.flow_edit(flow_config="flow.custom.json", editor="invalid")
+
+
+def test_save_flow_steps_rejects_invalid_template_reference(tmp_path: Path) -> None:
+    output_path = tmp_path / "flow.json"
+    steps = [
+        FlowStep(
+            key="plan",
+            agent_name="Agent",
+            role_desc="Planejamento",
+            command="codex exec --skip-git-repo-check",
+            instruction="Planeje",
+            input_template="{instruction}\n\n{user_prompt}",
+        ),
+        FlowStep(
+            key="implement",
+            agent_name="Agent",
+            role_desc="Implementação",
+            command="codex exec --skip-git-repo-check",
+            instruction="Implemente",
+            input_template="{instruction}\n\n{final_plan}",
+        ),
+    ]
+
+    with pytest.raises(ConfigError, match="final_plan"):
+        main_module._save_flow_steps(output_path, steps)
+
+    assert output_path.exists() is False
+
+
+def test_save_flow_steps_persists_enabled_false(tmp_path: Path) -> None:
+    output_path = tmp_path / "flow.json"
+    steps = [
+        FlowStep(
+            key="plan",
+            agent_name="Agent",
+            role_desc="Planejamento",
+            command="codex exec --skip-git-repo-check",
+            instruction="Planeje",
+            input_template="{instruction}\n\n{user_prompt}",
+            enabled=False,
+        ),
+    ]
+
+    main_module._save_flow_steps(output_path, steps)
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["steps"][0]["enabled"] is False
 
 
 def test_resolve_role_desc_choice_accepts_suggestion_index() -> None:
