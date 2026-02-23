@@ -165,6 +165,7 @@ Exemplo com `steps`:
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
 - `is_code` (opcional, boolean): trata saída como código para renderização.
+- `enabled` (opcional, boolean): quando `false`, o passo é pulado na execução (default: `true`).
 - `timeout` (opcional, inteiro > 0): timeout do passo em segundos. Padrão: `120`.
 - `max_input_chars` (opcional, inteiro > 0): limite de input para o passo.
 - `max_output_chars` (opcional, inteiro > 0): limite de output mantido em memória/contexto para o passo.
@@ -193,7 +194,24 @@ Por padrão, o Council envolve saídas de agentes nos placeholders acima com del
 
 Esse encapsulamento reduz risco de prompt injection indireto entre etapas ao separar instrução do passo de dados vindos de LLMs anteriores.
 
-## 5.1 Placeholder no `command` e Autocompletar Gemini
+### 5.1 Pular Passos com `enabled: false`
+
+Você pode manter um passo no JSON e desabilitar temporariamente sua execução:
+
+```json
+{
+  "key": "final_plan",
+  "enabled": false
+}
+```
+
+Com isso:
+
+- O passo não executa CLI.
+- O `key` do passo continua válido no template de passos seguintes.
+- O valor de `{key_do_passo_pulado}` herda o `last_output` disponível no momento do skip.
+
+## 5.2 Placeholder no `command` e Autocompletar Gemini
 
 Algumas CLIs não leem bem por `stdin`. Para esses casos, você pode usar o placeholder `{input}` no campo `command`:
 
@@ -220,7 +238,7 @@ O carregamento falha com erro claro quando:
 3. `steps` está ausente (quando objeto) ou formato não é lista.
 4. Não há nenhum passo.
 5. Campos obrigatórios não existem ou não são string.
-6. `is_code` não é boolean.
+6. `is_code` ou `enabled` não são boolean.
 7. Há `key` duplicada.
 8. A `key` usa nome reservado: `user_prompt`, `full_context`, `last_output`, `instruction`.
 9. O `input_template` referencia placeholder inexistente.
