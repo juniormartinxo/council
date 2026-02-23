@@ -42,12 +42,13 @@ class Orchestrator:
 
     def run_flow(self, user_prompt: str):
         """Dispara todas as etapas (Planejamento, Crítica, Consolidação, Impl. e Revisão)"""
+        planned_steps = sum(1 for step in self.flow_steps if step.enabled)
         log_event(
             self._audit_logger,
             "orchestrator.flow.start",
             level=logging.INFO,
             prompt_chars=len(user_prompt),
-            planned_steps=len(self.flow_steps),
+            planned_steps=planned_steps,
             flow_config_source=self.flow_config_source or "default",
             flow_config_path=self.flow_config_path,
         )
@@ -56,7 +57,10 @@ class Orchestrator:
         self._step_sequence = 0
         self._executed_steps = 0
         self._successful_steps = 0
-        self._active_run_id = self._open_history_run(user_prompt=user_prompt)
+        self._active_run_id = self._open_history_run(
+            user_prompt=user_prompt,
+            planned_steps=planned_steps,
+        )
         run_started_perf = perf_counter()
         flow_status = "success"
         flow_error_message: str | None = None
@@ -66,6 +70,23 @@ class Orchestrator:
             last_output = ""
 
             for step in self.flow_steps:
+                if not step.enabled:
+                    step_outputs[step.key] = last_output
+                    self.ui.console.print(
+                        f"\nPulando passo desabilitado: {step.agent_name} ({step.role_desc})"
+                    )
+                    log_event(
+                        self._audit_logger,
+                        "orchestrator.step.skipped",
+                        level=logging.INFO,
+                        step_key=step.key,
+                        agent_name=step.agent_name,
+                        role_desc=step.role_desc,
+                        reason="disabled",
+                        inherited_output_chars=len(last_output),
+                    )
+                    continue
+
                 wrapped_step_outputs = {
                     key: self._wrap_agent_data_block(value, source=key)
                     for key, value in step_outputs.items()
@@ -353,7 +374,7 @@ class Orchestrator:
             f"{AGENT_DATA_BLOCK_END}"
         )
 
-    def _open_history_run(self, user_prompt: str) -> int | None:
+    def _open_history_run(self, user_prompt: str, planned_steps: int) -> int | None:
         if self.history_store is None or not self._history_store_available:
             return None
         return self._safe_history_call(
@@ -362,7 +383,7 @@ class Orchestrator:
                 prompt=user_prompt,
                 flow_config_path=self.flow_config_path,
                 flow_config_source=self.flow_config_source,
-                planned_steps=len(self.flow_steps),
+                planned_steps=planned_steps,
             ),
         )
 
