@@ -154,8 +154,9 @@ A modificação de novos sub-agentes não requer mexer na interface de usuário 
 Cada passo aceita, entre outros campos:
 - `key`: identificador do resultado para ser reutilizado em passos seguintes.
 - `agent_name` / `role_desc`: rótulos exibidos na UI.
-- `command`: CLI real que será executada (ex: `claude -p`, `gemini -p {input}`, `codex exec --skip-git-repo-check`).
-  - Validacao de seguranca no parse: o binario deve existir no `PATH`, estar na allowlist (`claude`, `gemini`, `codex`, `ollama`) e nao pode usar caminho explicito; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
+- `command`: CLI/provedor real que será executado (ex: `claude -p`, `gemini -p {input}`, `codex exec --skip-git-repo-check`, `deepseek --model deepseek-chat`).
+  - Validacao de seguranca no parse: o primeiro token deve estar na allowlist (`claude`, `gemini`, `codex`, `ollama`, `deepseek`) e nao pode usar caminho explicito; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
+  - Para CLIs, o binario deve existir no `PATH`. `deepseek` e API-only e nao exige binario local.
 - `instruction`: instrução principal do papel.
 - `input_template`: template com variáveis (`{user_prompt}`, `{full_context}`, `{last_output}` e `{key}` de passos anteriores).
 - `enabled`: quando `false`, o passo é mantido no fluxo, mas é pulado na execução.
