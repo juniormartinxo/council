@@ -37,6 +37,7 @@ from council.config import (
     get_default_flow_steps,
     load_flow_steps,
     resolve_flow_config,
+    validate_flow_template_references,
 )
 from council.history_store import HistoryStore
 from council.limits import read_positive_int_env
@@ -429,11 +430,12 @@ def _build_simple_flow_steps_table(steps: list[FlowStep]) -> Table:
     table = Table(title="Passos atuais", expand=False, header_style="bold")
     table.add_column("#", no_wrap=True, style="cyan")
     table.add_column("Key", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
     table.add_column("Agente", no_wrap=True)
     table.add_column("Papel", no_wrap=True)
     table.add_column("Comando")
     if not steps:
-        table.add_row("-", "(nenhum passo)", "-", "-", "-")
+        table.add_row("-", "(nenhum passo)", "-", "-", "-", "-")
         return table
     for index, step in enumerate(steps, start=1):
         command_preview = step.command.replace("\n", " ").strip() or "(vazio)"
@@ -442,6 +444,7 @@ def _build_simple_flow_steps_table(steps: list[FlowStep]) -> Table:
         table.add_row(
             str(index),
             step.key,
+            "on" if step.enabled else "off",
             step.agent_name,
             step.role_desc,
             command_preview,
@@ -609,6 +612,7 @@ def _prompt_step_form(step: FlowStep, index: int, console: Console) -> FlowStep:
     )
     style = _prompt_text_field("style", step.style, console, fallback="blue")
     is_code = Confirm.ask("is_code?", default=step.is_code, console=console)
+    enabled = Confirm.ask("enabled?", default=step.enabled, console=console)
     timeout = _prompt_positive_int("timeout (segundos)", step.timeout, console)
     max_input_chars = _prompt_optional_positive_int(
         "max_input_chars (vazio = padrão)",
@@ -635,6 +639,7 @@ def _prompt_step_form(step: FlowStep, index: int, console: Console) -> FlowStep:
         input_template=input_template,
         style=style,
         is_code=is_code,
+        enabled=enabled,
         timeout=timeout,
         max_input_chars=max_input_chars,
         max_output_chars=max_output_chars,
@@ -650,6 +655,7 @@ def _new_default_step(position: int) -> FlowStep:
         command="codex exec --skip-git-repo-check",
         instruction="instruction",
         input_template=_DEFAULT_INPUT_TEMPLATE,
+        enabled=True,
     )
 
 
@@ -765,6 +771,8 @@ def _serialize_flow_steps(steps: list[FlowStep]) -> dict[str, list[dict[str, obj
             serialized_step["style"] = step.style
         if step.is_code:
             serialized_step["is_code"] = True
+        if not step.enabled:
+            serialized_step["enabled"] = False
         if step.timeout != 120:
             serialized_step["timeout"] = step.timeout
         if step.max_input_chars:
@@ -778,6 +786,7 @@ def _serialize_flow_steps(steps: list[FlowStep]) -> dict[str, list[dict[str, obj
 
 
 def _save_flow_steps(flow_path: Path, steps: list[FlowStep]) -> None:
+    validate_flow_template_references(steps)
     flow_path.parent.mkdir(parents=True, exist_ok=True)
     payload = _serialize_flow_steps(steps)
     with flow_path.open("w", encoding="utf-8") as file:
@@ -818,6 +827,9 @@ def _run_flow_edit_simple(flow_path: Path | None) -> None:
     target_path = _resolve_save_path(flow_path, console)
     try:
         _save_flow_steps(target_path, updated_steps)
+    except ConfigError as exc:
+        console.print(f"[red]Fluxo inválido: {exc}[/red]")
+        raise typer.Exit(code=1)
     except OSError as exc:
         console.print(f"[red]Erro ao salvar fluxo em '{target_path}': {exc}[/red]")
         raise typer.Exit(code=1)
