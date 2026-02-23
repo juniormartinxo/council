@@ -78,7 +78,7 @@ Inspeção rápida de runs persistidos no SQLite local:
 council history runs --limit 20
 ```
 
-Diagnóstico de pré-requisitos de binários para o fluxo:
+Diagnóstico de pré-requisitos do fluxo:
 
 ```bash
 council doctor
