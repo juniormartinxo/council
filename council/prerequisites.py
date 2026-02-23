@@ -52,6 +52,8 @@ def collect_required_binaries(flow_steps: Sequence[FlowStep]) -> list[str]:
     seen: set[str] = set()
 
     for step in flow_steps:
+        if not step.enabled:
+            continue
         binary = _extract_binary_name(step.command)
         if binary is None or binary in seen:
             continue
