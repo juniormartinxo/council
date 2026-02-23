@@ -8,7 +8,7 @@
 
 ## 🚀 Sobre o Projeto
 
-O **Council** é um orquestrador CLI construído do zero em **Python**, que projeta um consenso automatizado (Multi-Agent System) entre instâncias distintas de LLMs. Em vez de depender de pesadas bibliotecas de abstração de IA (como LangChain ou AutoGen), o Council adota uma abordagem de infraestrutura *agnóstica*, conectando-se diretamente a ferramentas bash e CLIs independentes (`claude`, `gemini`, `codex`) via injeção segura de `stdin/stdout`.
+O **Council** é um orquestrador CLI construído do zero em **Python**, que projeta um consenso automatizado (Multi-Agent System) entre instâncias distintas de LLMs. Em vez de depender de pesadas bibliotecas de abstração de IA (como LangChain ou AutoGen), o Council adota uma abordagem de infraestrutura *agnóstica*, conectando-se diretamente a ferramentas bash/CLIs independentes (`claude`, `gemini`, `codex`, `ollama`) e também a providers via API (ex: `deepseek`) de forma uniforme no fluxo.
 
 Este projeto é um laboratório prático de **Engenharia de Software e Arquitetura de Sistemas**, demonstrando forte domínio em gerenciamento de processos do Sistema Operacional, manipulação de streams de dados IO sem bloqueio, e desenvolvimento de interfaces ricas baseadas em terminal (TUI).
 
@@ -69,19 +69,30 @@ Visão de execução ponta-a-ponta com diagrama Mermaid: `docs/APPLICATION_FLOW.
 
 Regras de seguranca aplicadas ao `flow.json` (campo `command`):
 
-- O binario (primeiro token) precisa existir no `PATH`.
-- O binario precisa estar na allowlist: `claude`, `gemini`, `codex`, `ollama`.
+- O binario/provedor (primeiro token) precisa estar na allowlist: `claude`, `gemini`, `codex`, `ollama`, `deepseek`.
+- Para comandos CLI, o binario precisa existir no `PATH`.
+- Exceção: `deepseek` é provider API-only (não requer binário local).
 - O primeiro token deve ser apenas nome de binario (caminho explicito como `/usr/bin/codex` e bloqueado).
 - O parser rejeita `\n`/`\r` e operadores de shell perigosos (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`).
 - Fluxos de origem nao confiavel ainda exigem cautela, pois comandos allowlisted continuam executando no host local.
 
+Provider DeepSeek (API):
+
+- Use no `command`: `deepseek --model deepseek-chat` (ou `deepseek --model deepseek-reasoner`).
+- Defina `DEEPSEEK_API_KEY` no ambiente.
+- Opcional: sobrescreva endpoint com `DEEPSEEK_API_BASE_URL`.
+
 Resumo rápido:
 
-1. Crie seu fluxo a partir do exemplo:
+1. Crie seu fluxo com o editor visual (TUI) interativo ou o modo terminal assistido:
 
 ```bash
-cp flow.example.json flow.meu.json
+council flow edit flow.meu.json --editor tui
+# ou
+council flow edit flow.meu.json --editor simple
 ```
+
+*Alternativa manual:* copie a partir do modelo base `cp flow.example.json flow.meu.json` e faça o parsing.
 
 2. Ajuste o mapeamento de papéis para as IAs no JSON.
 
@@ -116,8 +127,11 @@ council run "Crie um algoritmo distribuido de map-reduce"
 # Dispara com fluxo customizado (escolhendo IAs/papéis livremente)
 council run "Crie um algoritmo distribuido de map-reduce" --flow-config flow.example.json
 
-# Abre a TUI interativa (Textual)
+# Abre a TUI interativa (Textual) para rodar os fluxos
 council tui
+
+# Abre o Editor TUI para modificar a estrutura do fluxo (papéis, configs e prompts)
+council flow edit flow.meu.json --editor tui
 
 # Diagnostico explicito dos binarios exigidos pelo fluxo
 council doctor
@@ -191,6 +205,7 @@ Depois disso, use:
 ```bash
 council run "Seu prompt"
 council tui
+council flow edit
 council doctor
 ```
 
