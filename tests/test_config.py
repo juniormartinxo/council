@@ -175,6 +175,70 @@ def test_load_flow_steps_raises_on_reserved_step_key(tmp_path: Path) -> None:
         load_flow_steps(str(path))
 
 
+def test_load_flow_steps_raises_on_unavailable_template_reference(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(
+        path,
+        [
+            _step_payload(key="plan", input_template="{instruction}\n\n{user_prompt}"),
+            _step_payload(key="implement", input_template="{instruction}\n\n{final_plan}"),
+        ],
+    )
+
+    with pytest.raises(ConfigError, match="final_plan"):
+        load_flow_steps(str(path))
+
+
+def test_load_flow_steps_allows_reference_to_previous_step_output(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(
+        path,
+        [
+            _step_payload(key="plan", input_template="{instruction}\n\n{user_prompt}"),
+            _step_payload(key="implement", input_template="{instruction}\n\n{plan}"),
+        ],
+    )
+
+    steps = load_flow_steps(str(path))
+
+    assert [step.key for step in steps] == ["plan", "implement"]
+
+
+def test_load_flow_steps_allows_reference_to_disabled_previous_step_output(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(
+        path,
+        [
+            _step_payload(key="plan", input_template="{instruction}\n\n{user_prompt}", enabled=False),
+            _step_payload(key="implement", input_template="{instruction}\n\n{plan}"),
+        ],
+    )
+
+    steps = load_flow_steps(str(path))
+
+    assert [step.key for step in steps] == ["plan", "implement"]
+    assert steps[0].enabled is False
+    assert steps[1].enabled is True
+
+
+def test_load_flow_steps_parses_enabled_flag(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(key="disabled", enabled=False)])
+
+    steps = load_flow_steps(str(path))
+
+    assert len(steps) == 1
+    assert steps[0].enabled is False
+
+
+def test_load_flow_steps_rejects_non_boolean_enabled_flag(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(enabled="false")])
+
+    with pytest.raises(ConfigError, match="enabled"):
+        load_flow_steps(str(path))
+
+
 def test_load_flow_steps_parses_alias_fields_and_is_code(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
     payload = {
