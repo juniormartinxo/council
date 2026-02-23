@@ -35,6 +35,24 @@ def test_collect_required_binaries_deduplicates_preserving_order() -> None:
     assert binaries == ["claude", "gemini", "codex"]
 
 
+def test_collect_required_binaries_ignores_disabled_steps() -> None:
+    steps = [
+        _build_step("claude -p"),
+        FlowStep(
+            key="disabled",
+            agent_name="Agent",
+            role_desc="Role",
+            command="codex exec --skip-git-repo-check",
+            instruction="instruction",
+            enabled=False,
+        ),
+    ]
+
+    binaries = collect_required_binaries(steps)
+
+    assert binaries == ["claude"]
+
+
 def test_evaluate_flow_prerequisites_marks_missing_binaries(monkeypatch: pytest.MonkeyPatch) -> None:
     steps = [
         _build_step("claude -p"),
