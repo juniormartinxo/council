@@ -8,6 +8,8 @@ import logging
 from contextlib import contextmanager
 from pathlib import Path
 
+from rich.markdown import Markdown as RichMarkdown
+from rich.syntax import Syntax
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -239,7 +241,8 @@ class CouncilTextualApp(App[None]):
         self._feedback_event = threading.Event()
         self._feedback_value: str | None = None
         self._stream_buffers: dict[str, list[str]] = {self.GENERAL_STEP_ID: []}
-        self._result_buffers: dict[str, list[str]] = {self.GENERAL_STEP_ID: []}
+        self._result_render_buffers: dict[str, list[object]] = {self.GENERAL_STEP_ID: []}
+        self._result_text_buffers: dict[str, list[str]] = {self.GENERAL_STEP_ID: []}
         self._step_labels: dict[str, str] = {self.GENERAL_STEP_ID: "Geral"}
         self._stream_selected_step_id = self.GENERAL_STEP_ID
         self._result_selected_step_id = self.GENERAL_STEP_ID
@@ -376,8 +379,10 @@ class CouncilTextualApp(App[None]):
     def _ensure_step_tabs(self, step_id: str, label: str) -> None:
         if step_id not in self._stream_buffers:
             self._stream_buffers[step_id] = []
-        if step_id not in self._result_buffers:
-            self._result_buffers[step_id] = []
+        if step_id not in self._result_render_buffers:
+            self._result_render_buffers[step_id] = []
+        if step_id not in self._result_text_buffers:
+            self._result_text_buffers[step_id] = []
 
         stream_tab_ids = {tab.id for tab in self._stream_tabs().query("Tab")}
         stream_tab_id = self._tab_id("stream_tab", step_id)
@@ -424,8 +429,8 @@ class CouncilTextualApp(App[None]):
     def _refresh_result_log(self) -> None:
         result_log = self._result_log()
         result_log.clear()
-        for line in self._result_buffers.get(self._result_selected_step_id, []):
-            result_log.write(line)
+        for renderable in self._result_render_buffers.get(self._result_selected_step_id, []):
+            result_log.write(renderable)
 
     def _append_stream_line(self, text: str, step_id: str | None = None) -> None:
         target_step = step_id or self._current_step_id
@@ -436,14 +441,21 @@ class CouncilTextualApp(App[None]):
         if self._stream_selected_step_id in {self.GENERAL_STEP_ID, target_step}:
             self._stream_log().write(text)
 
-    def _append_result_line(self, text: str, step_id: str | None = None) -> None:
+    def _append_result_renderable(
+        self,
+        renderable: object,
+        plain_text: str,
+        step_id: str | None = None,
+    ) -> None:
         target_step = step_id or self._current_step_id
-        self._result_buffers.setdefault(self.GENERAL_STEP_ID, []).append(text)
+        self._result_render_buffers.setdefault(self.GENERAL_STEP_ID, []).append(renderable)
+        self._result_text_buffers.setdefault(self.GENERAL_STEP_ID, []).append(plain_text)
         if target_step != self.GENERAL_STEP_ID:
-            self._result_buffers.setdefault(target_step, []).append(text)
+            self._result_render_buffers.setdefault(target_step, []).append(renderable)
+            self._result_text_buffers.setdefault(target_step, []).append(plain_text)
 
         if self._result_selected_step_id in {self.GENERAL_STEP_ID, target_step}:
-            self._result_log().write(text)
+            self._result_log().write(renderable)
 
     def set_status(self, text: str, style: str = "white") -> None:
         self._dispatch_ui(self._set_status, text, style)
@@ -492,27 +504,32 @@ class CouncilTextualApp(App[None]):
         is_code: bool,
         language: str,
     ) -> None:
-        del style, is_code, language
-        self._append_result_line(f"=== {title} ===")
-        self._append_result_line(content)
-        self._append_result_line("")
+        del style
+        if is_code:
+            rendered_content: object = Syntax(content, language, theme="monokai", word_wrap=True)
+        else:
+            rendered_content = RichMarkdown(content)
+
+        self._append_result_renderable(f"=== {title} ===", plain_text=f"=== {title} ===")
+        self._append_result_renderable(rendered_content, plain_text=content)
+        self._append_result_renderable("", plain_text="")
 
     def show_error(self, message: str) -> None:
         self._dispatch_ui(self._show_error, message)
 
     def _show_error(self, message: str) -> None:
-        self._append_result_line("=== Erro ===")
-        self._append_result_line(message)
-        self._append_result_line("")
+        self._append_result_renderable("=== Erro ===", plain_text="=== Erro ===")
+        self._append_result_renderable(message, plain_text=message)
+        self._append_result_renderable("", plain_text="")
         self._set_status(message, style="red")
 
     def show_success(self, message: str) -> None:
         self._dispatch_ui(self._show_success, message)
 
     def _show_success(self, message: str) -> None:
-        self._append_result_line("=== Sucesso ===")
-        self._append_result_line(message)
-        self._append_result_line("")
+        self._append_result_renderable("=== Sucesso ===", plain_text="=== Sucesso ===")
+        self._append_result_renderable(message, plain_text=message)
+        self._append_result_renderable("", plain_text="")
         self._set_status(message, style="green")
 
     def clear_logs(self) -> None:
@@ -522,7 +539,8 @@ class CouncilTextualApp(App[None]):
         self._stream_log().clear()
         self._result_log().clear()
         self._stream_buffers = {self.GENERAL_STEP_ID: []}
-        self._result_buffers = {self.GENERAL_STEP_ID: []}
+        self._result_render_buffers = {self.GENERAL_STEP_ID: []}
+        self._result_text_buffers = {self.GENERAL_STEP_ID: []}
         self._step_labels = {self.GENERAL_STEP_ID: "Geral"}
         self._stream_selected_step_id = self.GENERAL_STEP_ID
         self._result_selected_step_id = self.GENERAL_STEP_ID
@@ -675,7 +693,7 @@ class CouncilTextualApp(App[None]):
         selected_step = self._result_selected_step_id
         selected_label = self._step_labels.get(selected_step, selected_step)
         self._copy_text_payload(
-            payload="\n".join(self._result_buffers.get(selected_step, [])),
+            payload="\n".join(self._result_text_buffers.get(selected_step, [])),
             label=f"resultados_{selected_label}",
             empty_message="Resultados vazios para copiar.",
         )
