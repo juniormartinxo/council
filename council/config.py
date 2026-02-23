@@ -5,6 +5,7 @@ import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from string import Formatter
 from typing import Any, Literal, Mapping
 
 from council.paths import get_user_flow_config_path
@@ -38,6 +39,8 @@ DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<!>)>(?!>)"), ">"),
 )
 ALLOWED_COMMAND_BINARIES = frozenset({"claude", "gemini", "codex", "ollama"})
+_TEMPLATE_FORMATTER = Formatter()
+_TEMPLATE_FIELD_BASE_PATTERN = re.compile(r"[.\[]")
 
 
 class ConfigError(Exception):
@@ -54,6 +57,7 @@ class FlowStep:
     input_template: str = "{instruction}\n\n{full_context}"
     style: str = "blue"
     is_code: bool = False
+    enabled: bool = True
     timeout: int = 120
     max_input_chars: int | None = None
     max_output_chars: int | None = None
@@ -233,6 +237,8 @@ def load_flow_steps(
             f"As chaves de passos não podem usar nomes reservados ({conflicts_as_text})."
         )
 
+    validate_flow_template_references(steps)
+
     return steps
 
 
@@ -281,6 +287,35 @@ def render_step_input(step: FlowStep, context: Mapping[str, str]) -> str:
         ) from exc
 
 
+def _extract_template_variables(input_template: str) -> set[str]:
+    variables: set[str] = set()
+    for _literal, field_name, _format_spec, _conversion in _TEMPLATE_FORMATTER.parse(input_template):
+        if field_name is None:
+            continue
+        cleaned_field_name = field_name.strip()
+        if not cleaned_field_name:
+            continue
+        base_name = _TEMPLATE_FIELD_BASE_PATTERN.split(cleaned_field_name, maxsplit=1)[0].strip()
+        if base_name:
+            variables.add(base_name)
+    return variables
+
+
+def validate_flow_template_references(steps: list[FlowStep]) -> None:
+    available_variables = set(RESERVED_TEMPLATE_KEYS)
+    for step in steps:
+        referenced_variables = _extract_template_variables(step.input_template)
+        missing_variables = sorted(
+            variable for variable in referenced_variables if variable not in available_variables
+        )
+        if missing_variables:
+            missing_key = missing_variables[0]
+            raise ConfigError(
+                f"O passo '{step.key}' referencia a variável inexistente '{missing_key}' no input_template."
+            )
+        available_variables.add(step.key)
+
+
 def _extract_steps(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return payload
@@ -309,6 +344,7 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
     )
     style = _get_string(raw_step, ["style"], required=False) or "blue"
     is_code = _get_bool(raw_step, "is_code", default=False)
+    enabled = _get_bool(raw_step, "enabled", default=True)
     timeout = _get_optional_positive_int(raw_step, "timeout", step=position) or 120
     max_input_chars = _get_optional_positive_int(raw_step, "max_input_chars", step=position)
     max_output_chars = _get_optional_positive_int(raw_step, "max_output_chars", step=position)
@@ -323,6 +359,7 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
         input_template=input_template,
         style=style,
         is_code=is_code,
+        enabled=enabled,
         timeout=timeout,
         max_input_chars=max_input_chars,
         max_output_chars=max_output_chars,
