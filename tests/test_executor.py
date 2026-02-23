@@ -1,4 +1,6 @@
 import subprocess
+import json
+from io import BytesIO
 from typing import Any
 
 import pytest
@@ -93,6 +95,20 @@ class FakeProcess:
         return None
 
 
+class FakeHTTPResponse:
+    def __init__(self, body: str) -> None:
+        self._stream = BytesIO(body.encode("utf-8"))
+
+    def read(self) -> bytes:
+        return self._stream.read()
+
+    def __enter__(self) -> "FakeHTTPResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
 def _patch_popen(monkeypatch: pytest.MonkeyPatch, process: FakeProcess) -> dict[str, Any]:
     calls: dict[str, Any] = {}
 
@@ -177,6 +193,91 @@ def test_is_gemini_prompt_missing_value(command: str, expected: bool) -> None:
     executor = Executor(DummyUI())
 
     assert executor._is_gemini_prompt_missing_value(command) is expected
+
+
+def test_run_cli_executes_deepseek_via_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+    streamed: list[str] = []
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setenv(executor_module.DEEPSEEK_API_KEY_ENV_VAR, "secret-key")
+
+    def popen_should_not_run(*args: Any, **kwargs: Any) -> FakeProcess:
+        raise AssertionError("Popen should not be called for deepseek provider.")
+
+    def fake_urlopen(request, timeout: int) -> FakeHTTPResponse:
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["auth"] = request.get_header("Authorization")
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeHTTPResponse(
+            json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "linha 1\nlinha 2",
+                            }
+                        }
+                    ]
+                }
+            )
+        )
+
+    monkeypatch.setattr(executor_module.subprocess, "Popen", popen_should_not_run)
+    monkeypatch.setattr(executor_module.urllib.request, "urlopen", fake_urlopen)
+
+    output = executor.run_cli(
+        "deepseek --model deepseek-chat --temperature 0.5 --max-tokens 256",
+        "prompt de teste",
+        on_output=streamed.append,
+    )
+
+    assert output == "linha 1\nlinha 2"
+    assert streamed == ["linha 1", "linha 2"]
+    assert ui.errors == []
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["timeout"] == 120
+    assert captured["auth"] == "Bearer secret-key"
+    assert captured["body"]["model"] == "deepseek-chat"
+    assert captured["body"]["temperature"] == 0.5
+    assert captured["body"]["max_tokens"] == 256
+    assert captured["body"]["messages"] == [{"role": "user", "content": "prompt de teste"}]
+
+
+def test_run_cli_deepseek_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+    monkeypatch.delenv(executor_module.DEEPSEEK_API_KEY_ENV_VAR, raising=False)
+
+    def urlopen_should_not_run(*args: Any, **kwargs: Any) -> FakeHTTPResponse:
+        raise AssertionError("DeepSeek API should not be called without API key.")
+
+    monkeypatch.setattr(executor_module.urllib.request, "urlopen", urlopen_should_not_run)
+
+    with pytest.raises(CommandError, match=executor_module.DEEPSEEK_API_KEY_ENV_VAR):
+        executor.run_cli("deepseek --model deepseek-chat", "prompt")
+
+    assert len(ui.errors) == 1
+    assert executor_module.DEEPSEEK_API_KEY_ENV_VAR in ui.errors[0]
+
+
+def test_run_cli_deepseek_rejects_unsupported_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    ui = DummyUI()
+    executor = Executor(ui)
+    monkeypatch.setenv(executor_module.DEEPSEEK_API_KEY_ENV_VAR, "secret-key")
+
+    def urlopen_should_not_run(*args: Any, **kwargs: Any) -> FakeHTTPResponse:
+        raise AssertionError("DeepSeek API should not be called for invalid command options.")
+
+    monkeypatch.setattr(executor_module.urllib.request, "urlopen", urlopen_should_not_run)
+
+    with pytest.raises(CommandError, match="Opções suportadas"):
+        executor.run_cli("deepseek --foo bar", "prompt")
+
+    assert len(ui.errors) == 1
+    assert "Opções suportadas" in ui.errors[0]
 
 
 def test_run_cli_returns_output_and_streams_lines(monkeypatch: pytest.MonkeyPatch) -> None:
