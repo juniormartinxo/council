@@ -38,6 +38,53 @@ def test_execute_save_omits_empty_input_template(tmp_path: Path) -> None:
     assert "input_template" not in step
 
 
+def test_execute_save_persists_enabled_false(tmp_path: Path) -> None:
+    disabled_step = _build_step(DEFAULT_INPUT_TEMPLATE)
+    disabled_step = FlowStep(
+        key=disabled_step.key,
+        agent_name=disabled_step.agent_name,
+        role_desc=disabled_step.role_desc,
+        command=disabled_step.command,
+        instruction=disabled_step.instruction,
+        input_template=disabled_step.input_template,
+        enabled=False,
+    )
+    payload = _save_and_load_payload(tmp_path, disabled_step)
+    step = payload["steps"][0]
+    assert step["enabled"] is False
+
+
+def test_execute_save_rejects_invalid_template_reference(tmp_path: Path) -> None:
+    output_path = tmp_path / "flow.json"
+    app = FlowConfigApp(config_path=output_path)
+    notifications: list[str] = []
+    app.notify = lambda message, *args, **kwargs: notifications.append(str(message))
+    app.steps = [
+        FlowStep(
+            key="plan",
+            agent_name="Agent",
+            role_desc="Planejamento",
+            command="codex exec --skip-git-repo-check",
+            instruction="instruction-plan",
+            input_template="{instruction}\n\n{user_prompt}",
+        ),
+        FlowStep(
+            key="implement",
+            agent_name="Agent",
+            role_desc="Implementação",
+            command="codex exec --skip-git-repo-check",
+            instruction="instruction-impl",
+            input_template="{instruction}\n\n{final_plan}",
+        ),
+    ]
+
+    app._execute_save()
+
+    assert output_path.exists() is False
+    assert any("Fluxo inválido" in message for message in notifications)
+    assert any("final_plan" in message for message in notifications)
+
+
 class _StubInput:
     def __init__(self, value: str) -> None:
         self.value = value
@@ -105,6 +152,7 @@ def test_save_form_to_step_replaces_frozen_flow_step() -> None:
         "#ta-instruction": _StubTextArea("new instruction"),
         "#ta-input-template": _StubTextArea(""),
         "#cb-is-code": _StubCheckbox(True),
+        "#cb-enabled": _StubCheckbox(False),
         "#in-timeout": _StubInput("90"),
         "#in-max-input": _StubInput("1000"),
         "#in-max-output": _StubInput("2000"),
@@ -125,6 +173,7 @@ def test_save_form_to_step_replaces_frozen_flow_step() -> None:
     assert updated_step.instruction == "new instruction"
     assert updated_step.input_template == DEFAULT_INPUT_TEMPLATE
     assert updated_step.is_code is True
+    assert updated_step.enabled is False
     assert updated_step.timeout == 90
     assert updated_step.max_input_chars == 1000
     assert updated_step.max_output_chars == 2000
