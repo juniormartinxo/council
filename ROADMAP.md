@@ -80,7 +80,7 @@ Um produto precisa ser instalável de forma universal sem fricção, evitando do
 
 ### 🔮 Futuro
 
-*   **Gerenciador de Dependências de Modelos Embutido:** Hoje o Council depende da injeção no PATH via CLIs externas (`claude`, `gemini`, `codex`). Introduzir abstração de *Adapters* opcionais. Exemplo: `council auth anthropic --key xyz`, permitindo que o Council faça requests HTTP diretamente quando a CLI global não for encontrada. **Atenção:** isso deve ser um *modo alternativo*, nunca substituição do modelo atual de CLIs externas, para preservar a filosofia agnóstica que é o DNA do projeto.
+*   **Gerenciador de Dependências de Modelos Embutido:** Hoje o Council é majoritariamente orientado a CLIs no `PATH` (já com suporte inicial a API provider via `deepseek`). Introduzir abstração mais ampla de *Adapters* opcionais. Exemplo: `council auth anthropic --key xyz`, permitindo requests HTTP diretos quando a CLI global não for encontrada. **Atenção:** isso deve ser um *modo alternativo*, nunca substituição do modelo atual de CLIs externas, para preservar a filosofia agnóstica que é o DNA do projeto.
 
 ---
 
