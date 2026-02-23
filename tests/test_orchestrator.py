@@ -235,6 +235,92 @@ def test_orchestrator_wraps_previous_outputs_when_rendering_templates() -> None:
     assert "resultado" in second_input
 
 
+def test_orchestrator_skips_disabled_step_and_preserves_its_placeholder() -> None:
+    state = CouncilState(max_context_chars=500)
+    ui = DummyUI()
+    executor = DummyExecutor()
+    steps = [
+        FlowStep(
+            key="plan",
+            agent_name="Planner",
+            role_desc="Plan",
+            command="claude -p",
+            instruction="Plan",
+            input_template="{instruction}\n\n{user_prompt}",
+        ),
+        FlowStep(
+            key="final_plan",
+            agent_name="Consolidator",
+            role_desc="Consolidation",
+            command="claude -p",
+            instruction="Consolidate",
+            input_template="{instruction}\n\n{plan}",
+            enabled=False,
+        ),
+        FlowStep(
+            key="code",
+            agent_name="Coder",
+            role_desc="Implementation",
+            command="codex exec --skip-git-repo-check",
+            instruction="Code",
+            input_template="{instruction}\n\nFINAL:\n{final_plan}\n\nLAST:\n{last_output}",
+        ),
+    ]
+    orchestrator = Orchestrator(state, executor, ui, flow_steps=steps)
+
+    orchestrator.run_flow("Prompt inicial")
+
+    assert len(executor.calls) == 2
+    second_input = str(executor.calls[1]["input_data"])
+    assert "ORIGEM: final_plan" in second_input
+    assert "ORIGEM: last_output" in second_input
+    assert "resultado" in second_input
+
+
+def test_orchestrator_history_counts_only_enabled_steps_as_planned() -> None:
+    state = CouncilState(max_context_chars=500)
+    ui = DummyUI()
+    executor = DummyExecutor()
+    history_store = DummyHistoryStore()
+    steps = [
+        FlowStep(
+            key="plan",
+            agent_name="Planner",
+            role_desc="Plan",
+            command="claude -p",
+            instruction="Plan",
+            input_template="{instruction}\n\n{user_prompt}",
+        ),
+        FlowStep(
+            key="disabled_step",
+            agent_name="Skipped",
+            role_desc="Skip",
+            command="claude -p",
+            instruction="Skip",
+            input_template="{instruction}\n\n{plan}",
+            enabled=False,
+        ),
+    ]
+    orchestrator = Orchestrator(
+        state,
+        executor,
+        ui,
+        flow_steps=steps,
+        history_store=history_store,
+        flow_config_path="flow.example.json",
+        flow_config_source="cli",
+    )
+
+    orchestrator.run_flow("Prompt inicial")
+
+    assert len(history_store.start_calls) == 1
+    assert history_store.start_calls[0]["planned_steps"] == 1
+    assert len(history_store.step_calls) == 1
+    assert len(history_store.finish_calls) == 1
+    assert history_store.finish_calls[0]["executed_steps"] == 1
+    assert history_store.finish_calls[0]["successful_steps"] == 1
+
+
 def test_follow_up_input_wraps_previous_output_as_data_block() -> None:
     state = CouncilState()
     ui = DummyUI()
