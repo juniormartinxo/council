@@ -26,7 +26,7 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
 
 | Ação | Esforço | Impacto |
 | :--- | :--- | :--- |
-| Introduzir allowlist de binários conhecidos (`claude`, `gemini`, `codex`, `ollama`) em `config.py`. Comandos fora da lista exigem confirmação interativa do usuário. | Médio | Alto |
+| Introduzir allowlist de binários conhecidos (`claude`, `gemini`, `codex`, `ollama`, `deepseek`) em `config.py`. Comandos fora da lista exigem confirmação interativa do usuário. | Médio | Alto |
 | Alertar na TUI/CLI quando um `flow.json` do CWD é detectado automaticamente, pedindo confirmação antes da primeira execução. | Baixo | Alto |
 | Documentar no `README.md` e `FLOW_CONFIG.md` o risco de executar fluxos de fontes não confiáveis. | Trivial | Médio |
 
@@ -37,7 +37,7 @@ A resolução de configuração em cascata (`_resolve_flow_config_path`) carrega
   - Confirmação limitada ao auto-load de `./flow.json`, sem cobrir origem via `COUNCIL_FLOW_CONFIG`.
 - Como foi corrigido:
   - Execução migrou para `subprocess.Popen(..., shell=False)` no executor.
-  - Allowlist de binários aplicada no parsing de `command`: `claude`, `gemini`, `codex`, `ollama`.
+  - Allowlist de binários aplicada no parsing de `command`: `claude`, `gemini`, `codex`, `ollama`, `deepseek`.
   - Rejeição de `command` com caminho explícito de binário (ex.: `/usr/bin/codex`).
   - Confirmação explícita de fluxos implícitos carregados via `./flow.json` (CWD) **e** `COUNCIL_FLOW_CONFIG` (env).
   - Em modo não interativo, execução implícita via CWD/env é bloqueada até uso de `--flow-config`.
@@ -65,7 +65,7 @@ Mitigado no parsing de `flow.json` com validação semântica obrigatória do ca
 
 **Mitigações aplicadas:**
 - Parse com `shlex.split()` para validar sintaxe de shell.
-- Verificação de binário real no `$PATH` via `shutil.which(tokens[0])`.
+- Verificação de binário real no `$PATH` via `shutil.which(tokens[0])` para comandos CLI (com exceção de providers API-only).
 - Rejeição de metacaracteres perigosos no `command`: `|`, `&&`, `;`, `` ` ``, `$(`, `${`, `$VAR`, `~`, `>`, `>>`.
 - Rejeição de quebras de linha `\n` e `\r` para evitar command chaining.
 - Rejeição de binários fora de allowlist e de comandos com caminho explícito no primeiro token.
