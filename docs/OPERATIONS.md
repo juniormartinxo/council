@@ -20,7 +20,7 @@ direnv allow
 # opcional: cp .envrc.local.example .envrc.local
 ```
 
-> **Aviso Operacional:** Os binários externos essenciais que representam os atores subjacentes à arquitetura (`claude`, `gemini`, `codex`) precisam estar globais ($PATH do OS) ou disponíveis na sessão corrente, sendo invocáveis independentemente do Python.
+> **Aviso Operacional:** O fluxo pode combinar providers via CLI (`claude`, `gemini`, `codex`, `ollama`) e via API (`deepseek`). CLIs exigem binário no `PATH`; para DeepSeek, configure `DEEPSEEK_API_KEY`.
 
 ## 2. Invocação Principal
 A orquestração do pipeline é iniciada via binário `council`, demandando o prompt primário e passando-o para ser triturado na topologia de múltiplos agentes:
@@ -136,15 +136,18 @@ tail -n 50 "${COUNCIL_HOME:-$HOME/.config/council}/council.log"
 ```
 
 ## 3. Comandos Externos Subjacentes vs Diagnóstico
-Em caso de falha de conexão nas interfaces LLM de retaguarda isoladas do seu projeto (por ausência de internet ou limitação de taxa), os erros serão propagados via _stderr_ sendo interceptados e expostos visualmente na UI de orquestração do Council pelo _Status Exit Code_ não-zero da Thread filho correspondente.
+Em caso de falha nas integrações LLM (CLI ou API), os erros são interceptados e exibidos na UI do Council.
+- No caminho CLI, a falha normalmente vem de `stderr` + `exit code` não-zero.
+- No caminho API (DeepSeek), a falha vem de erro HTTP/rede com mensagem normalizada pelo executor.
 
-O `council run` e a TUI validam automaticamente os binários exigidos pelo fluxo no `$PATH` antes da execução.
-Para diagnóstico explícito de pré-requisitos e caminhos resolvidos, use `council doctor`.
+O `council run` e a TUI validam automaticamente os pré-requisitos exigidos pelo fluxo antes da execução.
+Para diagnóstico explícito (binários resolvidos e providers API), use `council doctor`.
 
 Para debugar a anomalia fora da esteira:
 - `claude -p "teste debug"`
 - `gemini -p "teste debug"`
 - `codex exec --skip-git-repo-check "teste debug"`
+- para `deepseek`, valide o token: `echo "$DEEPSEEK_API_KEY"` (não vazio) e rode um fluxo com `command: "deepseek --model deepseek-chat"`.
 
 ## 4. Evolução do Código e Configurações (Extensibilidade)
 Esta estrutura Modular e Polimórfica foi concebida para que futuros _DevOps_ ou Engenheiros amplifiquem e expandam os Modelos Interagentes sem quebrar o loop central:
