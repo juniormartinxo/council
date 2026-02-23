@@ -9,6 +9,10 @@ from typing import Sequence
 
 from council.config import FlowStep
 
+_API_PROVIDER_ENDPOINTS = {
+    "deepseek": "https://api.deepseek.com",
+}
+
 
 @dataclass(frozen=True)
 class BinaryPrerequisiteStatus:
@@ -22,6 +26,17 @@ def evaluate_flow_prerequisites(flow_steps: Sequence[FlowStep]) -> list[BinaryPr
     statuses: list[BinaryPrerequisiteStatus] = []
 
     for binary in collect_required_binaries(flow_steps):
+        api_endpoint = _API_PROVIDER_ENDPOINTS.get(binary)
+        if api_endpoint is not None:
+            statuses.append(
+                BinaryPrerequisiteStatus(
+                    binary=binary,
+                    resolved_path=api_endpoint,
+                    is_available=True,
+                )
+            )
+            continue
+
         resolved = shutil.which(binary)
         if resolved is None:
             statuses.append(
