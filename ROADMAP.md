@@ -16,16 +16,18 @@ Antes de avançar em features de alto impacto, a base técnica precisa sustentar
 
 *   **Empacotamento (`pyproject.toml`):** O Council é distribuível como pacote Python com entry-point `council` via `pip install .` ou `pipx install .`. Comando global `council run` e `council tui` funcionam sem `python -m`.
 *   **Diretório de dados do usuário (`COUNCIL_HOME`):** Módulo `paths.py` centraliza caminhos de armazenamento respeitando `XDG_CONFIG_HOME` (Linux), `~/Library/Application Support` (macOS) e `APPDATA` (Windows). O estado da TUI já persiste em `~/.config/council/tui_state.json`.
+*   **Editor TUI nativo de configuração de fluxos (`council flow edit`)**: Introdução de um editor visual guiado no terminal (e variante simple text) que simplifica a criação, adição, remoção e reordenação dos blocos de agents, consolidando a "Developer Experience".
 *   **Hardening de artefatos locais sensíveis (SEC-05):** Fallback de clipboard migrou de `/tmp` para `COUNCIL_HOME/clipboard`, com permissão `0o600` para arquivos, `0o700` para diretório, cleanup automático por retenção e cobertura em testes da TUI.
 *   **Hardening do histórico persistido (SEC-03):** Comando `council history clear` para limpeza explícita, documentação de retenção no README/OPERATIONS e opção de criptografia at-rest dos prompts via `COUNCIL_TUI_STATE_PASSPHRASE`.
+*   **Persistência estruturada do pipeline (`COUNCIL_HOME/db`):** Banco local SQLite documenta logs precisos (historico persistido das execuções) viabilizando metadados (`council history runs`), timestamps e outputs auditáveis para suportar debug de LLMs assíncronos offline. O banco é protegido com escalonamento de permissão restrito no host.
 *   **Auditoria estruturada local (DEF-02):** Logger em `COUNCIL_HOME/council.log` com eventos de `run`/`tui`/`doctor`, rotação por tamanho (`COUNCIL_LOG_MAX_BYTES`, `COUNCIL_LOG_BACKUP_COUNT`), permissões endurecidas e validação fail-fast de configuração (`COUNCIL_LOG_LEVEL` e limites de rotação).
 *   **Resolução de configuração em cascata:** O `flow.json` é resolvido automaticamente em 4 níveis: `--flow-config` → `$COUNCIL_FLOW_CONFIG` → `./flow.json` (CWD) → `~/.config/council/flow.json` → default interno.
-*   **Testes automatizados (suite mínima `pytest`):** Base de testes criada em `tests/` com cobertura de smoke tests para `config.py` (parsing de JSON, validação de duplicatas/chaves reservadas, templates e hardening de `command` com `which()` + bloqueio de operadores) e `executor.py` (preparação de comandos, placeholder `{input}`, variações de prompt do Gemini, sucesso/erro/timeout/cancelamento em `run_cli`). `pyproject.toml` atualizado com `project.optional-dependencies.dev` e configuração de `pytest`.
+*   **Testes automatizados (suite mínima `pytest`):** Base de testes criada em `tests/` com cobertura de smoke tests para `config.py` e `executor.py`. `pyproject.toml` atualizado com `project.optional-dependencies.dev` e configuração de `pytest`.
 
 ### 🔜 Próximos passos
 
 *   **CI de Testes:** Executar `pytest` automaticamente em pull requests e merges para proteger regressões do core (`config`, `executor`, `orchestrator` e TUI state) e tornar a validação contínua, não apenas local.
-*   **Evolução da persistência estruturada (`COUNCIL_HOME/db`):** O banco SQLite já registra runs e steps (prompt, outputs, duração e timestamps). Próximo ciclo: retenção configurável, exportação e consultas avançadas para suporte ao dashboard de telemetria (§4).
+*   **Dashboard TUI de Analítica (§4):** Construir telemetria consumindo os dados do log estruturado e histórico estruturado para estimativas de uso/tokens consumidos.
 
 ---
 
