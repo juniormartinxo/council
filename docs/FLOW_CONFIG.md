@@ -160,7 +160,8 @@ Exemplo com `steps`:
 - `agent_name` (obrigatório): nome exibido na UI.
 - `role_desc` (obrigatório): descrição do papel exibida na UI.
 - `command` (obrigatório): comando CLI da IA/ferramenta.
-  - Segurança: o primeiro token precisa existir no `PATH`, estar na allowlist (`claude`, `gemini`, `codex`, `ollama`) e não pode usar caminho explícito de binário (ex.: `/usr/bin/codex`); quebras de linha (`\n`, `\r`) e operadores de shell (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`) são bloqueados.
+  - Segurança: o primeiro token deve estar na allowlist (`claude`, `gemini`, `codex`, `ollama`, `deepseek`) e não pode usar caminho explícito de binário (ex.: `/usr/bin/codex`); quebras de linha (`\n`, `\r`) e operadores de shell (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`) são bloqueados.
+  - Para comandos CLI, o binário precisa existir no `PATH`; exceção: `deepseek` é provider API-only.
 - `instruction` (obrigatório): instrução principal do passo.
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
@@ -229,6 +230,12 @@ Nessa rota, o payload é delimitado automaticamente com:
 
 **Especial para Gemini**: Como conveniência extra, se você configurar o comando estritamente como `gemini -p` ou `gemini --prompt` (sem indicar o valor e sem usar explicitamente o placeholder `{input}`), o executor irá detectar esse padrão automaticamente. Ele tratará a sintaxe anexando o payload escapado no final do comando de forma invisível.
 
+**Provider DeepSeek via API**:
+
+- Use `command` como `deepseek --model deepseek-chat` (default) ou `deepseek --model deepseek-reasoner`.
+- Flags opcionais no command: `--temperature`, `--max-tokens`, `--base-url`.
+- Variáveis de ambiente: `DEEPSEEK_API_KEY` (obrigatória) e `DEEPSEEK_API_BASE_URL` (opcional).
+
 ## 6. Regras de Validação
 
 O carregamento falha com erro claro quando:
@@ -242,8 +249,8 @@ O carregamento falha com erro claro quando:
 7. Há `key` duplicada.
 8. A `key` usa nome reservado: `user_prompt`, `full_context`, `last_output`, `instruction`.
 9. O `input_template` referencia placeholder inexistente.
-10. O `command` usa binário inexistente no `PATH`.
-11. O `command` usa binário fora da allowlist (`claude`, `gemini`, `codex`, `ollama`).
+10. O `command` usa binário inexistente no `PATH` (exceto provider API-only como `deepseek`).
+11. O `command` usa binário/provedor fora da allowlist (`claude`, `gemini`, `codex`, `ollama`, `deepseek`).
 12. O `command` usa caminho explícito no primeiro token (ex.: `/usr/bin/codex`).
 13. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
 14. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
