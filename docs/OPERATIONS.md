@@ -158,6 +158,7 @@ Cada passo aceita, entre outros campos:
   - Validacao de seguranca no parse: o binario deve existir no `PATH`, estar na allowlist (`claude`, `gemini`, `codex`, `ollama`) e nao pode usar caminho explicito; `\n`, `\r`, `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>` sao rejeitados.
 - `instruction`: instrução principal do papel.
 - `input_template`: template com variáveis (`{user_prompt}`, `{full_context}`, `{last_output}` e `{key}` de passos anteriores).
+- `enabled`: quando `false`, o passo é mantido no fluxo, mas é pulado na execução.
 
 *Exemplo reduzido de step:*
 ```json
