@@ -5,6 +5,10 @@ import os
 import signal
 import tempfile
 import logging
+import json
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from time import perf_counter
 from typing import TextIO
 
@@ -22,6 +26,19 @@ OUTPUT_TRUNCATION_NOTICE = (
 )
 CLI_INPUT_BLOCK_START = "===COUNCIL_INPUT_ARGV_START==="
 CLI_INPUT_BLOCK_END = "===COUNCIL_INPUT_ARGV_END==="
+DEEPSEEK_COMMAND_NAME = "deepseek"
+DEEPSEEK_API_KEY_ENV_VAR = "DEEPSEEK_API_KEY"
+DEEPSEEK_API_BASE_URL_ENV_VAR = "DEEPSEEK_API_BASE_URL"
+DEFAULT_DEEPSEEK_API_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
+
+
+@dataclass(frozen=True)
+class _DeepSeekCommandConfig:
+    model: str = DEFAULT_DEEPSEEK_MODEL
+    base_url: str = DEFAULT_DEEPSEEK_API_BASE_URL
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 class CommandError(Exception):
     """Exceção levantada quando um subprocesso falha."""
@@ -123,6 +140,61 @@ class Executor:
                     )
                 )
                 raise CommandError(f"Input acima do limite para: {command}")
+
+            command_tokens = shlex.split(command)
+            if self._is_deepseek_command_tokens(command_tokens):
+                command_display = shlex.join(command_tokens)
+                log_event(
+                    self._audit_logger,
+                    "executor.command.start",
+                    level=logging.INFO,
+                    command=command_display,
+                    timeout_seconds=timeout,
+                    input_chars=len(input_data),
+                    stdin_chars=0,
+                    max_input_chars=effective_max_input_chars,
+                    max_output_chars=effective_max_output_chars,
+                )
+                try:
+                    deepseek_output = self._run_deepseek_api(
+                        command_tokens=command_tokens,
+                        input_data=input_data,
+                        timeout=timeout,
+                    )
+                except ExecutionAborted:
+                    raise
+                except CommandError as exc:
+                    log_event(
+                        self._audit_logger,
+                        "executor.command.failed",
+                        level=logging.ERROR,
+                        command=command_display,
+                        return_code=None,
+                        stderr_chars=0,
+                        duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                    )
+                    error_logged = True
+                    self.ui.show_error(f"Falha ao executar '{command_display}':\n{exc}")
+                    raise
+
+                final_output, output_truncated = self._truncate_output(
+                    deepseek_output,
+                    max_chars=effective_max_output_chars,
+                )
+                if on_output and final_output:
+                    for line in final_output.splitlines():
+                        on_output(line)
+                log_event(
+                    self._audit_logger,
+                    "executor.command.completed",
+                    level=logging.INFO,
+                    command=command_display,
+                    return_code=0,
+                    output_chars=len(final_output),
+                    output_truncated=output_truncated,
+                    duration_ms=int((perf_counter() - run_started_perf) * 1000),
+                )
+                return final_output
 
             command_argv, stdin_payload = self._prepare_command(command, input_data)
             command_display = shlex.join(command_argv)
@@ -311,6 +383,235 @@ class Executor:
                 output_spool.close()
             with self._process_lock:
                 self._current_process = None
+
+    def _is_deepseek_command_tokens(self, command_tokens: list[str]) -> bool:
+        return bool(command_tokens) and command_tokens[0] == DEEPSEEK_COMMAND_NAME
+
+    def _run_deepseek_api(
+        self,
+        *,
+        command_tokens: list[str],
+        input_data: str,
+        timeout: int,
+    ) -> str:
+        if self._cancel_event.is_set():
+            raise ExecutionAborted("Execução abortada pelo usuário.")
+
+        command_config = self._parse_deepseek_command(command_tokens)
+        api_key = os.getenv(DEEPSEEK_API_KEY_ENV_VAR, "").strip()
+        if not api_key:
+            raise CommandError(
+                f"Defina {DEEPSEEK_API_KEY_ENV_VAR} para usar o provider DeepSeek."
+            )
+
+        payload: dict[str, object] = {
+            "model": command_config.model,
+            "messages": [{"role": "user", "content": input_data}],
+            "stream": False,
+        }
+        if command_config.temperature is not None:
+            payload["temperature"] = command_config.temperature
+        if command_config.max_tokens is not None:
+            payload["max_tokens"] = command_config.max_tokens
+
+        endpoint = f"{command_config.base_url}/chat/completions"
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw_response = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            error_message = self._extract_deepseek_error_message(error_body) or str(exc)
+            raise CommandError(f"API DeepSeek retornou erro HTTP {exc.code}: {error_message}") from exc
+        except urllib.error.URLError as exc:
+            raise CommandError(f"Falha de conexão com a API DeepSeek: {exc.reason}") from exc
+
+        if self._cancel_event.is_set():
+            raise ExecutionAborted("Execução abortada pelo usuário.")
+
+        return self._extract_deepseek_response_text(raw_response)
+
+    def _parse_deepseek_command(self, command_tokens: list[str]) -> _DeepSeekCommandConfig:
+        if not self._is_deepseek_command_tokens(command_tokens):
+            raise CommandError("Comando DeepSeek inválido.")
+
+        model = DEFAULT_DEEPSEEK_MODEL
+        base_url = os.getenv(DEEPSEEK_API_BASE_URL_ENV_VAR, DEFAULT_DEEPSEEK_API_BASE_URL).strip()
+        temperature: float | None = None
+        max_tokens: int | None = None
+
+        index = 1
+        while index < len(command_tokens):
+            token = command_tokens[index]
+
+            if token in {"--model", "-m"}:
+                model, index = self._read_required_token_value(command_tokens, index, token)
+                continue
+            if token.startswith("--model="):
+                model = token.partition("=")[2].strip()
+                if not model:
+                    raise CommandError("Valor de --model não pode ser vazio no comando deepseek.")
+                index += 1
+                continue
+            if token in {"--temperature", "-t"}:
+                raw_value, index = self._read_required_token_value(command_tokens, index, token)
+                try:
+                    temperature = float(raw_value)
+                except ValueError as exc:
+                    raise CommandError(f"Valor inválido para {token}: {raw_value}") from exc
+                continue
+            if token.startswith("--temperature="):
+                raw_value = token.partition("=")[2].strip()
+                try:
+                    temperature = float(raw_value)
+                except ValueError as exc:
+                    raise CommandError(f"Valor inválido para --temperature: {raw_value}") from exc
+                index += 1
+                continue
+            if token == "--max-tokens":
+                raw_value, index = self._read_required_token_value(command_tokens, index, token)
+                max_tokens = self._parse_positive_int_value(raw_value, token)
+                continue
+            if token.startswith("--max-tokens="):
+                raw_value = token.partition("=")[2].strip()
+                max_tokens = self._parse_positive_int_value(raw_value, "--max-tokens")
+                index += 1
+                continue
+            if token == "--base-url":
+                base_url, index = self._read_required_token_value(command_tokens, index, token)
+                continue
+            if token.startswith("--base-url="):
+                base_url = token.partition("=")[2].strip()
+                if not base_url:
+                    raise CommandError("Valor de --base-url não pode ser vazio no comando deepseek.")
+                index += 1
+                continue
+
+            raise CommandError(
+                "Comando deepseek inválido. Opções suportadas: "
+                "--model/-m, --temperature/-t, --max-tokens e --base-url."
+            )
+
+        normalized_base_url = base_url.strip().rstrip("/")
+        if not normalized_base_url:
+            raise CommandError("URL base da API DeepSeek não pode ser vazia.")
+        if not model.strip():
+            raise CommandError("Modelo DeepSeek não pode ser vazio.")
+
+        return _DeepSeekCommandConfig(
+            model=model.strip(),
+            base_url=normalized_base_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    def _read_required_token_value(
+        self,
+        command_tokens: list[str],
+        current_index: int,
+        option_name: str,
+    ) -> tuple[str, int]:
+        next_index = current_index + 1
+        if next_index >= len(command_tokens):
+            raise CommandError(f"O comando deepseek exige valor para {option_name}.")
+        value = command_tokens[next_index].strip()
+        if not value:
+            raise CommandError(f"O comando deepseek exige valor não vazio para {option_name}.")
+        return value, next_index + 1
+
+    def _parse_positive_int_value(self, raw_value: str, option_name: str) -> int:
+        try:
+            parsed = int(raw_value)
+        except ValueError as exc:
+            raise CommandError(f"Valor inválido para {option_name}: {raw_value}") from exc
+        if parsed <= 0:
+            raise CommandError(f"{option_name} deve ser um inteiro positivo.")
+        return parsed
+
+    def _extract_deepseek_error_message(self, raw_body: str) -> str | None:
+        try:
+            payload = json.loads(raw_body)
+        except json.JSONDecodeError:
+            return raw_body.strip() or None
+        if not isinstance(payload, dict):
+            return raw_body.strip() or None
+        if "error" not in payload:
+            return None
+        error_value = payload.get("error")
+        if isinstance(error_value, dict):
+            message = error_value.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        if isinstance(error_value, str) and error_value.strip():
+            return error_value.strip()
+        return None
+
+    def _extract_deepseek_response_text(self, raw_response: str) -> str:
+        try:
+            payload = json.loads(raw_response)
+        except json.JSONDecodeError as exc:
+            raise CommandError("Resposta inválida da API DeepSeek (JSON malformado).") from exc
+
+        if not isinstance(payload, dict):
+            raise CommandError("Resposta inválida da API DeepSeek (objeto JSON esperado).")
+
+        error_message = self._extract_deepseek_error_message(raw_response)
+        if error_message and "choices" not in payload:
+            raise CommandError(f"Erro retornado pela API DeepSeek: {error_message}")
+
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise CommandError("Resposta da API DeepSeek sem campo 'choices'.")
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise CommandError("Resposta da API DeepSeek com formato de choice inválido.")
+
+        message_payload = first_choice.get("message")
+        if not isinstance(message_payload, dict):
+            raise CommandError("Resposta da API DeepSeek sem campo 'message'.")
+
+        content = self._extract_text_content(message_payload.get("content"))
+        reasoning = self._extract_text_content(message_payload.get("reasoning_content"))
+        text = content or reasoning
+        if not text:
+            raise CommandError("Resposta da API DeepSeek sem conteúdo de texto.")
+        return text.strip()
+
+    def _extract_text_content(self, value: object) -> str:
+        if isinstance(value, str):
+            return value
+        if not isinstance(value, list):
+            return ""
+
+        chunks: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                chunks.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                chunks.append(text)
+        return "".join(chunks)
+
+    def _truncate_output(self, output: str, *, max_chars: int) -> tuple[str, bool]:
+        cleaned_output = output.strip()
+        if len(cleaned_output) <= max_chars:
+            return cleaned_output, False
+        truncated = cleaned_output[-max_chars:].strip()
+        return f"{OUTPUT_TRUNCATION_NOTICE}{truncated}".strip(), True
 
     def _prepare_command(self, command: str, input_data: str) -> tuple[list[str], str]:
         """
