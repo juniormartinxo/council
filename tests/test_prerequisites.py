@@ -94,3 +94,23 @@ def test_evaluate_flow_prerequisites_flags_world_writable_binary_location(
     assert len(risky) == 1
     assert risky[0].binary == "claude"
     assert risky[0].is_world_writable_location is True
+
+
+def test_evaluate_flow_prerequisites_accepts_deepseek_api_provider_without_which_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called_binaries: list[str] = []
+
+    def fake_which(binary: str) -> str | None:
+        called_binaries.append(binary)
+        return None
+
+    monkeypatch.setattr(prerequisites_module.shutil, "which", fake_which)
+
+    statuses = evaluate_flow_prerequisites([_build_step("deepseek --model deepseek-chat")])
+
+    assert len(statuses) == 1
+    assert statuses[0].binary == "deepseek"
+    assert statuses[0].resolved_path == "https://api.deepseek.com"
+    assert statuses[0].is_available is True
+    assert called_binaries == []
