@@ -9,7 +9,7 @@ A base de código do Council adere estritamente à ideia de _Single Responsibili
 - `main.py` -> **Entrypoint / Roteador** (Apenas roteia os argumentos).
 - `config.py` -> **Camada de Configuração de Fluxo** (Carrega e valida passos do pipeline em JSON).
 - `orchestrator.py` -> **Regra de Negócios / Controlador** (Contém a sequência de chamadas e lógicas de fluxo).
-- `executor.py` -> **Camada de Infraestrutura / Adapter** (Acesso direto a chamadas do SO via Subprocess).
+- `executor.py` -> **Camada de Infraestrutura / Adapter** (Execução de CLIs via Subprocess e providers API suportados).
 - `ui.py` -> **Camada de Apresentação / View** (Isolamento total dos prints baseados no Rich).
 - `tui.py` -> **Camada de Apresentação Interativa** (Textual App + adaptador para reaproveitar Orchestrator/Executor).
 - `state.py` -> **Repositório em Memória / Entidade** (Armazena a evolução do contexto do agente).
@@ -58,7 +58,7 @@ No carregamento de `flow.json`, o `config.py` também aplica validação semânt
 
 Para formato, exemplos e validações operacionais, consulte `FLOW_CONFIG.md`.
 
-## 5. Integração Headless & TUI-Bypassing
+## 5. Integração Headless, TUI-Bypassing e Providers API
 
 Ao injetarmos requisições pipeadas `string -> subprocess(cmd)`, sistemas avançados de TUI (Interfaces baseadas em Terminal ANSI) quebram violando o padrão TTY pseudo-terminal do kernel, resultando no famigerado: `Error: stdin is not a terminal`.
 
@@ -66,6 +66,7 @@ Para garantir orquestração fluida em rotinas invisíveis, o orquestrador impõ
 - Codex: Invoca-se através de `codex exec --skip-git-repo-check` para desviar da interface TUI/Menu e anular a validação forçada sobre o repositório Git subjacente.
 - Claude: Adicionado o modo _print_ `-p` estritamente para não invocar prompt de aprovação interativo.
 - Gemini: no caso `gemini -p`/`--prompt` sem valor explícito, o `executor.py` detecta o padrão e injeta o payload via `argv` em bloco delimitado (`===COUNCIL_INPUT_ARGV_START===`/`===COUNCIL_INPUT_ARGV_END===`), mantendo execução com `subprocess.Popen(..., shell=False)`.
+- DeepSeek: para `command` iniciado por `deepseek`, o executor desvia de subprocesso e usa chamada HTTP para `POST /chat/completions`, com autenticação via `DEEPSEEK_API_KEY`.
 
 ## 6. Auditoria Estruturada e Fail-Fast de Configuração
 
