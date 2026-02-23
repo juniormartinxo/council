@@ -183,6 +183,7 @@ def test_save_form_to_step_replaces_frozen_flow_step() -> None:
 def test_resolve_default_command_for_agent() -> None:
     assert FlowConfigApp._resolve_default_command_for_agent("Gemini") == "gemini -p {input}"
     assert FlowConfigApp._resolve_default_command_for_agent("Codex") == "codex exec --skip-git-repo-check"
+    assert FlowConfigApp._resolve_default_command_for_agent("DeepSeek") == "deepseek --model deepseek-chat"
     assert FlowConfigApp._resolve_default_command_for_agent("Desconhecido") is None
 
 
