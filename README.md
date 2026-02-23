@@ -111,7 +111,7 @@ council run "Seu prompt"
 
 ## ⚙️ Instalação Local
 
-O ambiente não exige o uso do LangChain. Tudo se resume a ferramentas CLI padronizadas que existam no PATH do repositório/SO rodando de fato a mágica.
+O ambiente não exige o uso do LangChain. O Council funciona com provedores definidos no seu `flow.json`, combinando CLIs locais (no `PATH`) e providers via API (ex: `deepseek` com `DEEPSEEK_API_KEY`).
 
 ```bash
 # Geração do ambiente virtual restrito e ativado
@@ -133,7 +133,7 @@ council tui
 # Abre o Editor TUI para modificar a estrutura do fluxo (papéis, configs e prompts)
 council flow edit flow.meu.json --editor tui
 
-# Diagnostico explicito dos binarios exigidos pelo fluxo
+# Diagnostico explicito dos pré-requisitos exigidos pelo fluxo
 council doctor
 ```
 
