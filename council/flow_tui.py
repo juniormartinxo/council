@@ -26,6 +26,7 @@ from textual.widgets import (
 
 from council.config import (
     ALLOWED_COMMAND_BINARIES,
+    API_ONLY_COMMAND_BINARIES,
     ConfigError,
     FlowStep,
     get_default_flow_steps,
@@ -62,12 +63,14 @@ DEFAULT_AGENT_OPTIONS = (
     "Gemini",
     "Codex",
     "Ollama",
+    "DeepSeek",
 )
 DEFAULT_COMMAND_BY_AGENT = {
     "claude": "claude -p",
     "gemini": "gemini -p {input}",
     "codex": "codex exec --skip-git-repo-check",
     "ollama": "ollama run llama3.1",
+    "deepseek": "deepseek --model deepseek-chat",
 }
 
 
@@ -658,6 +661,9 @@ class FlowConfigApp(App[None]):
         binary = command.split()[0]
         if binary not in ALLOWED_COMMAND_BINARIES:
             warning_lbl.update(f"⚠️  Binário '{binary}' não está na allowlist global.")
+            warning_lbl.remove_class("hidden")
+        elif binary in API_ONLY_COMMAND_BINARIES:
+            warning_lbl.update("ℹ️  Provider via API remota (sem binário local no PATH).")
             warning_lbl.remove_class("hidden")
         elif shutil.which(binary) is None:
             warning_lbl.update(f"ℹ️  Binário '{binary}' não encontrado no PATH atual. (Aviso)")
