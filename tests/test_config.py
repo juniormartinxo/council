@@ -336,6 +336,15 @@ def test_load_flow_steps_raises_on_unknown_command_binary(tmp_path: Path) -> Non
         load_flow_steps(str(path))
 
 
+def test_load_flow_steps_accepts_deepseek_api_provider_without_local_binary(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="deepseek --model deepseek-chat")])
+
+    steps = load_flow_steps(str(path))
+
+    assert steps[0].command == "deepseek --model deepseek-chat"
+
+
 def test_load_flow_steps_raises_on_non_allowlisted_binary(tmp_path: Path) -> None:
     path = tmp_path / "flow.json"
     _write_json(path, [_step_payload(command="echo test")])
