@@ -26,9 +26,11 @@ from textual.widgets import (
 
 from council.config import (
     ALLOWED_COMMAND_BINARIES,
+    ConfigError,
     FlowStep,
     get_default_flow_steps,
     load_flow_steps,
+    validate_flow_template_references,
 )
 from council.flow_signature import get_signature_file_path
 
@@ -79,7 +81,8 @@ class StepListItem(ListItem):
         self._label = Label(self._format_label())
 
     def _format_label(self) -> str:
-        return f"{self.step_index + 1}. {self.step.agent_name} ({self.step.key})"
+        status = "on" if self.step.enabled else "off"
+        return f"{self.step_index + 1}. {self.step.agent_name} ({self.step.key}, {status})"
 
     def compose(self) -> ComposeResult:
         yield self._label
@@ -374,6 +377,7 @@ class FlowConfigApp(App[None]):
                             with Vertical(classes="form-group"):
                                 yield Label("Opções")
                                 yield Checkbox("É resultado de código? (is_code)", id="cb-is-code")
+                                yield Checkbox("Passo habilitado? (enabled)", id="cb-enabled", value=True)
 
                             with Horizontal(id="limits-grid"):
                                 with Vertical(classes="limits-col limits-col-left"):
@@ -619,6 +623,7 @@ class FlowConfigApp(App[None]):
             txt_template.text = step.input_template
 
             self.query_one("#cb-is-code", Checkbox).value = step.is_code
+            self.query_one("#cb-enabled", Checkbox).value = step.enabled
             self.query_one("#in-timeout", Input).value = str(step.timeout)
             self.query_one("#in-max-input", Input).value = str(step.max_input_chars) if step.max_input_chars else ""
             self.query_one("#in-max-output", Input).value = str(step.max_output_chars) if step.max_output_chars else ""
@@ -690,6 +695,7 @@ class FlowConfigApp(App[None]):
             self.query_one("#ta-input-template", TextArea).text.strip() or DEFAULT_INPUT_TEMPLATE
         )
         is_code = self.query_one("#cb-is-code", Checkbox).value
+        enabled = self.query_one("#cb-enabled", Checkbox).value
 
         timeout_val = self._parse_int_field(self.query_one("#in-timeout", Input).value)
         timeout = timeout_val if timeout_val is not None else 120
@@ -706,6 +712,7 @@ class FlowConfigApp(App[None]):
             input_template=input_template,
             style=style,
             is_code=is_code,
+            enabled=enabled,
             timeout=timeout,
             max_input_chars=max_input_chars,
             max_output_chars=max_output_chars,
@@ -732,7 +739,8 @@ class FlowConfigApp(App[None]):
             role_desc="Descrição do Papel",
             command="",
             instruction="",
-            input_template=DEFAULT_INPUT_TEMPLATE
+            input_template=DEFAULT_INPUT_TEMPLATE,
+            enabled=True,
         )
         self.steps.append(new_step)
         self.current_step_index = len(self.steps) - 1
@@ -809,50 +817,58 @@ class FlowConfigApp(App[None]):
             return
 
         try:
-             # Serializa manual para manter controle do formato
-             payload = {"steps": []}
-             for s in self.steps:
-                 normalized_input_template = s.input_template.strip() or DEFAULT_INPUT_TEMPLATE
-                 d = {
-                     "key": s.key,
-                     "agent_name": s.agent_name,
-                     "role_desc": s.role_desc,
-                     "command": s.command,
-                     "instruction": s.instruction,
-                 }
-                 if normalized_input_template != DEFAULT_INPUT_TEMPLATE:
-                     d["input_template"] = normalized_input_template
-                 if s.style != "blue":
-                     d["style"] = s.style
-                 if s.is_code:
-                     d["is_code"] = True
-                 if s.timeout != 120:
-                     d["timeout"] = s.timeout
-                 if s.max_input_chars:
-                     d["max_input_chars"] = s.max_input_chars
-                 if s.max_output_chars:
-                     d["max_output_chars"] = s.max_output_chars
-                 if s.max_context_chars:
-                     d["max_context_chars"] = s.max_context_chars
-                 
-                 payload["steps"].append(d)
+            validate_flow_template_references(self.steps)
+            # Serializa manual para manter controle do formato
+            payload = {"steps": []}
+            for s in self.steps:
+                normalized_input_template = s.input_template.strip() or DEFAULT_INPUT_TEMPLATE
+                d = {
+                    "key": s.key,
+                    "agent_name": s.agent_name,
+                    "role_desc": s.role_desc,
+                    "command": s.command,
+                    "instruction": s.instruction,
+                }
+                if normalized_input_template != DEFAULT_INPUT_TEMPLATE:
+                    d["input_template"] = normalized_input_template
+                if s.style != "blue":
+                    d["style"] = s.style
+                if s.is_code:
+                    d["is_code"] = True
+                if not s.enabled:
+                    d["enabled"] = False
+                if s.timeout != 120:
+                    d["timeout"] = s.timeout
+                if s.max_input_chars:
+                    d["max_input_chars"] = s.max_input_chars
+                if s.max_output_chars:
+                    d["max_output_chars"] = s.max_output_chars
+                if s.max_context_chars:
+                    d["max_context_chars"] = s.max_context_chars
 
-             # Grava de forma formatada
-             with open(self.config_path, "w", encoding="utf-8") as f:
-                 json.dump(payload, f, indent=2, ensure_ascii=False)
-                 f.write("\n") # EOF newline normal em editores
-                 
-             self.sub_title = str(self.config_path)
-             self.notify(f"Salvo em {self.config_path}", severity="information")
-             
-             # DEF-04: Remover assinatura antiga se existir
-             sig_path = get_signature_file_path(self.config_path)
-             if sig_path.exists():
-                 sig_path.unlink()
-                 self.notify("⚠️ Assinatura sidecar anterior invalidada e apagada.", severity="warning", timeout=6)
-                 
+                payload["steps"].append(d)
+
+            # Grava de forma formatada
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+                f.write("\n")  # EOF newline normal em editores
+
+            self.sub_title = str(self.config_path)
+            self.notify(f"Salvo em {self.config_path}", severity="information")
+
+            # DEF-04: Remover assinatura antiga se existir
+            sig_path = get_signature_file_path(self.config_path)
+            if sig_path.exists():
+                sig_path.unlink()
+                self.notify(
+                    "⚠️ Assinatura sidecar anterior invalidada e apagada.",
+                    severity="warning",
+                    timeout=6,
+                )
+        except ConfigError as exc:
+            self.notify(f"Fluxo inválido: {exc}", severity="error", timeout=6)
         except Exception as e:
-             self.notify(f"Erro ao salvar: {e}", severity="error", timeout=6)
+            self.notify(f"Erro ao salvar: {e}", severity="error", timeout=6)
 
 if __name__ == "__main__":
     app = FlowConfigApp()
