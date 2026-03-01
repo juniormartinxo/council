@@ -172,7 +172,9 @@ Exemplo com `steps`:
 - `instruction` (obrigatório): instrução principal do passo.
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
-- `is_code` (opcional, boolean): trata saída como código para renderização.
+- `is_code` (opcional, boolean): trata saída como código e aplica parser estrito.
+  - Quando `true`, o passo só é aceito se a saída vier em um único bloco Markdown válido (```` ```...``` ````), sem texto fora do bloco.
+  - Em caso de saída fora desse formato, o passo falha em modo fail-close (`CommandError`) e o fluxo é interrompido.
 - `enabled` (opcional, boolean): quando `false`, o passo é pulado na execução (default: `true`).
 - `timeout` (opcional, inteiro > 0): timeout do passo em segundos. Padrão: `120`.
 - `max_input_chars` (opcional, inteiro > 0): limite de input para o passo.
@@ -304,7 +306,7 @@ Se qualquer uma dessas variáveis estiver definida com valor inválido (não num
       "agent_name": "Codex",
       "role_desc": "Implementação",
       "command": "codex exec --skip-git-repo-check",
-      "instruction": "Implemente com base no plano e na crítica. Retorne só código.",
+      "instruction": "Implemente com base no plano e na crítica. Retorne APENAS um bloco Markdown de código cercado por ```.",
       "input_template": "{instruction}\n\nPlano:\n{plan}\n\nCrítica:\n{critique}",
       "is_code": true,
       "style": "bright_black"
