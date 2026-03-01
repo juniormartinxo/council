@@ -6,8 +6,10 @@ from council.state import CouncilState
 
 
 class DummyExecutor:
-    def __init__(self) -> None:
+    def __init__(self, output: str = "resultado", outputs: list[str] | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self.output = output
+        self.outputs = list(outputs or [])
 
     def run_cli(
         self,
@@ -29,13 +31,16 @@ class DummyExecutor:
         )
         if on_output:
             on_output("chunk")
-        return "resultado"
+        if self.outputs:
+            return self.outputs.pop(0)
+        return self.output
 
 
 class DummyUI:
     def __init__(self) -> None:
         self.console = self
         self.errors: list[str] = []
+        self.panels: list[dict[str, object]] = []
 
     def print(self, *args, **kwargs) -> None:
         del args, kwargs
@@ -50,7 +55,14 @@ class DummyUI:
         yield update
 
     def show_panel(self, title: str, content: str, style: str = "blue", is_code: bool = False) -> None:
-        del title, content, style, is_code
+        self.panels.append(
+            {
+                "title": title,
+                "content": content,
+                "style": style,
+                "is_code": is_code,
+            }
+        )
 
     def show_success(self, message: str) -> None:
         del message
@@ -319,6 +331,80 @@ def test_orchestrator_history_counts_only_enabled_steps_as_planned() -> None:
     assert len(history_store.finish_calls) == 1
     assert history_store.finish_calls[0]["executed_steps"] == 1
     assert history_store.finish_calls[0]["successful_steps"] == 1
+
+
+def test_orchestrator_code_step_requires_markdown_fence_and_stores_sanitized_output() -> None:
+    state = CouncilState(max_context_chars=500)
+    ui = DummyUI()
+    executor = DummyExecutor(output="```python\nprint('ok')\n```")
+    history_store = DummyHistoryStore()
+    step = FlowStep(
+        key="code",
+        agent_name="Coder",
+        role_desc="Implementation",
+        command="codex exec --skip-git-repo-check",
+        instruction="Code",
+        input_template="{instruction}\n\n{user_prompt}",
+        is_code=True,
+    )
+    orchestrator = Orchestrator(state, executor, ui, flow_steps=[step], history_store=history_store)
+
+    orchestrator.run_flow("Prompt inicial")
+
+    assert ui.errors == []
+    assert state.history[-1].content == "print('ok')"
+    assert history_store.step_calls[0]["status"] == "success"
+    assert history_store.step_calls[0]["output_data"] == "print('ok')"
+    assert ui.panels[-1]["content"] == "print('ok')"
+
+
+def test_orchestrator_code_step_fail_close_on_invalid_output_and_does_not_persist_raw_data() -> None:
+    state = CouncilState(max_context_chars=500)
+    ui = DummyUI()
+    raw_output = "texto solto sem bloco markdown"
+    executor = DummyExecutor(output=raw_output)
+    history_store = DummyHistoryStore()
+    step = FlowStep(
+        key="code",
+        agent_name="Coder",
+        role_desc="Implementation",
+        command="codex exec --skip-git-repo-check",
+        instruction="Code",
+        input_template="{instruction}\n\n{user_prompt}",
+        is_code=True,
+    )
+    orchestrator = Orchestrator(state, executor, ui, flow_steps=[step], history_store=history_store)
+
+    orchestrator.run_flow("Prompt inicial")
+
+    assert "O fluxo foi interrompido e etapas subsequentes foram abortadas." in ui.errors
+    assert len(state.history) == 1
+    assert state.history[0].agent == "Human"
+    assert history_store.step_calls[0]["status"] == "error"
+    assert history_store.step_calls[0]["output_data"] == ""
+    assert "Bloqueio de Segurança" in str(history_store.step_calls[0]["error_message"])
+    assert history_store.finish_calls[0]["status"] == "error"
+
+
+def test_orchestrator_non_code_step_allows_plain_output() -> None:
+    state = CouncilState(max_context_chars=500)
+    ui = DummyUI()
+    executor = DummyExecutor(output="codigo sem markdown")
+    step = FlowStep(
+        key="only",
+        agent_name="Agent",
+        role_desc="Role",
+        command="claude -p",
+        instruction="Instrucao",
+        input_template="{instruction}\n\n{user_prompt}",
+        is_code=False,
+    )
+    orchestrator = Orchestrator(state, executor, ui, flow_steps=[step])
+
+    orchestrator.run_flow("Prompt inicial")
+
+    assert ui.errors == []
+    assert state.history[-1].content == "codigo sem markdown"
 
 
 def test_follow_up_input_wraps_previous_output_as_data_block() -> None:
