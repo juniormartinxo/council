@@ -239,19 +239,17 @@ class Orchestrator:
                     max_output_chars=max_output_chars,
                 )
 
-            self.state.add_turn(agent_name, "assistant", result, role_desc)
-
-            # Limpa blocos markdown apenas na hora de exibir visualmente se for is_code
-            result_display = result
             if is_code:
-                lines = result.split("\n")
-                if lines and lines[0].strip().startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                result_display = "\n".join(lines).strip()
+                match = re.fullmatch(r"\s*```[^\n]*\n([\s\S]*?)\n?```\s*", result)
+                if not match:
+                    result = ""
+                    raise CommandError(
+                        "Bloqueio de Segurança: A saída do agente não contém um bloco Markdown válido."
+                    )
+                result = match.group(1).strip()
 
-            self.ui.show_panel(f"{agent_name} - {role_desc}", result_display, style=style, is_code=is_code)
+            self.state.add_turn(agent_name, "assistant", result, role_desc)
+            self.ui.show_panel(f"{agent_name} - {role_desc}", result, style=style, is_code=is_code)
             self._successful_steps += 1
             return result
         except ExecutionAborted as exc:
