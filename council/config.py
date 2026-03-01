@@ -125,7 +125,7 @@ def get_default_flow_steps() -> list[FlowStep]:
     implementation_instruction = (
         "Você é um engenheiro de software sênior focado em implementação limpa e produtiva. "
         "Implemente EXATAMENTE o que o plano consolidado especifica. Regras:\n\n"
-        "- Retorne APENAS código-fonte. Sem explicações, sem comentários desnecessários.\n"
+        "- Retorne APENAS um único bloco Markdown de código cercado por ``` (sem texto antes/depois).\n"
         "- Siga as convenções do projeto existente (linguagem, estilo, estrutura de diretórios).\n"
         "- Inclua tratamento de erros e validação de entrada onde aplicável.\n"
         "- Se o plano especificar testes, implemente-os também."
