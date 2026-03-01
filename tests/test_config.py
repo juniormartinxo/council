@@ -1,4 +1,5 @@
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -343,6 +344,93 @@ def test_load_flow_steps_accepts_deepseek_api_provider_without_local_binary(tmp_
     steps = load_flow_steps(str(path))
 
     assert steps[0].command == "deepseek --model deepseek-chat"
+
+
+def test_model_field_injects_into_claude_command(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude -p", model="claude-opus-4-5")])
+
+    steps = load_flow_steps(str(path))
+    tokens = shlex.split(steps[0].command)
+
+    assert tokens == ["claude", "--model", "claude-opus-4-5", "-p"]
+
+
+def test_model_field_injects_into_gemini_command(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="gemini -p {input}", model="gemini-2.5-pro")])
+
+    steps = load_flow_steps(str(path))
+    tokens = shlex.split(steps[0].command)
+
+    assert tokens == ["gemini", "--model", "gemini-2.5-pro", "-p", "{input}"]
+
+
+def test_model_field_injects_into_deepseek_command(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="deepseek", model="deepseek-reasoner")])
+
+    steps = load_flow_steps(str(path))
+    tokens = shlex.split(steps[0].command)
+
+    assert tokens == ["deepseek", "--model", "deepseek-reasoner"]
+
+
+def test_model_field_raises_for_unsupported_binary(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="codex exec", model="gpt-4.1")])
+
+    with pytest.raises(ConfigError, match="não é suportado.*codex"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_raises_when_model_in_command_long_flag(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude --model foo -p", model="bar")])
+
+    with pytest.raises(ConfigError, match="conflita com flag de modelo"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_raises_when_model_in_command_equals_form(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude --model=foo -p", model="bar")])
+
+    with pytest.raises(ConfigError, match="conflita com flag de modelo"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_raises_when_model_in_command_short_flag(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="deepseek -m deepseek-chat", model="deepseek-reasoner")])
+
+    with pytest.raises(ConfigError, match="conflita com flag de modelo"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_raises_when_model_is_empty_string(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude -p", model="   ")])
+
+    with pytest.raises(ConfigError, match="campo 'model'.*não pode ser vazio"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_raises_when_model_has_invalid_characters(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude -p", model="claude@opus")])
+
+    with pytest.raises(ConfigError, match="formato inválido"):
+        load_flow_steps(str(path))
+
+
+def test_model_field_is_optional(tmp_path: Path) -> None:
+    path = tmp_path / "flow.json"
+    _write_json(path, [_step_payload(command="claude -p")])
+
+    steps = load_flow_steps(str(path))
+
+    assert steps[0].command == "claude -p"
 
 
 def test_load_flow_steps_raises_on_non_allowlisted_binary(tmp_path: Path) -> None:
