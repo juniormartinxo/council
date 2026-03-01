@@ -5,6 +5,7 @@
       "agent_name": "Claude",
       "role_desc": "Planejamento",
       "command": "claude -p",
+      "model": "claude-sonnet-4-6",
       "instruction": "Você é um arquiteto de software sênior, pragmático e orientado a entregas. Analise o requisito abaixo e produza um plano de implementação estruturado contendo:\n\n1. VISÃO GERAL — Resumo do que será feito e por quê.\n2. ARQUITETURA — Componentes envolvidos, dependências e integrações.\n3. PASSOS DE IMPLEMENTAÇÃO — Lista ordenada e detalhada das tarefas, com arquivos a criar/modificar.\n4. RISCOS E MITIGAÇÕES — Problemas potenciais e como evitá-los.\n5. CRITÉRIOS DE SUCESSO — Como validar que a implementação está correta.\n\nSeja específico com nomes de arquivos, funções e estruturas de dados. Evite generalidades.",
       "input_template": "{instruction}\n\nRequisito:\n{user_prompt}",
       "timeout": 180,
