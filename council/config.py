@@ -40,6 +40,17 @@ DISALLOWED_COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 ALLOWED_COMMAND_BINARIES = frozenset({"claude", "gemini", "codex", "ollama", "deepseek"})
 API_ONLY_COMMAND_BINARIES = frozenset({"deepseek"})
+MODEL_FLAG_BY_BINARY: Mapping[str, str] = {
+    "claude": "--model",
+    "gemini": "--model",
+    "deepseek": "--model",
+}
+MODEL_CONFLICT_ALIASES_BY_BINARY: Mapping[str, tuple[str, ...]] = {
+    "claude": ("--model",),
+    "gemini": ("--model",),
+    "deepseek": ("--model", "-m"),
+}
+MODEL_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 _TEMPLATE_FORMATTER = Formatter()
 _TEMPLATE_FIELD_BASE_PATTERN = re.compile(r"[.\[]")
 
@@ -338,6 +349,11 @@ def _parse_step(raw_step: Any, position: int) -> FlowStep:
     role_desc = _get_string(raw_step, ["role_desc", "role"], required=True, step=position)
     command = _get_string(raw_step, ["command"], required=True, step=position)
     _validate_command(command, step=position)
+    model = _get_string(raw_step, ["model"], required=False, step=position)
+    if model is not None:
+        _validate_model_value(model, step=position)
+        command = _inject_model_into_command(command, model, step=position)
+        _validate_command(command, step=position)
     instruction = _get_string(raw_step, ["instruction"], required=True, step=position)
     input_template = (
         _get_string(raw_step, ["input_template"], required=False)
@@ -452,6 +468,39 @@ def _validate_command(command: str, step: int) -> None:
             f"O campo 'command' no passo #{step} usa binário não permitido: '{binary}'. "
             f"Permitidos: {allowed_bins_text}."
         )
+
+
+def _validate_model_value(model: str, step: int) -> None:
+    if not model:
+        raise ConfigError(f"O campo 'model' no passo #{step} não pode ser vazio.")
+    if not MODEL_VALUE_PATTERN.fullmatch(model):
+        raise ConfigError(
+            f"O campo 'model' no passo #{step} possui formato inválido: '{model}'. "
+            "Use apenas letras, números, '.', '_', '-', ':' ou '/'."
+        )
+
+
+def _inject_model_into_command(command: str, model: str, step: int) -> str:
+    tokens = shlex.split(command)
+    binary = tokens[0]
+    model_flag = MODEL_FLAG_BY_BINARY.get(binary)
+    if model_flag is None:
+        supported_bins = ", ".join(sorted(MODEL_FLAG_BY_BINARY))
+        raise ConfigError(
+            f"O campo 'model' no passo #{step} não é suportado para o binário '{binary}'. "
+            f"Binários suportados: {supported_bins}."
+        )
+
+    conflict_aliases = MODEL_CONFLICT_ALIASES_BY_BINARY.get(binary, (model_flag,))
+    for token in tokens[1:]:
+        for alias in conflict_aliases:
+            if token == alias or token.startswith(f"{alias}="):
+                raise ConfigError(
+                    f"O campo 'model' no passo #{step} conflita com flag de modelo já presente em "
+                    f"'command' ({alias}). Use apenas um dos dois."
+                )
+
+    return shlex.join([tokens[0], model_flag, model, *tokens[1:]])
 
 
 def _get_bool(source: dict[str, Any], field_name: str, default: bool) -> bool:
