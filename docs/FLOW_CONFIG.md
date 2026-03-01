@@ -146,6 +146,7 @@ Exemplo com `steps`:
       "agent_name": "Claude",
       "role_desc": "Planejamento",
       "command": "claude -p",
+      "model": "claude-sonnet-4-6",
       "instruction": "Gere um plano técnico.",
       "input_template": "{instruction}\n\nRequisito:\n{user_prompt}",
       "style": "dark_goldenrod"
@@ -162,6 +163,12 @@ Exemplo com `steps`:
 - `command` (obrigatório): comando CLI da IA/ferramenta.
   - Segurança: o primeiro token deve estar na allowlist (`claude`, `gemini`, `codex`, `ollama`, `deepseek`) e não pode usar caminho explícito de binário (ex.: `/usr/bin/codex`); quebras de linha (`\n`, `\r`) e operadores de shell (`|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`) são bloqueados.
   - Para comandos CLI, o binário precisa existir no `PATH`; exceção: `deepseek` é provider API-only.
+- `model` (opcional): modelo LLM do passo (ex.: `claude-opus-4-5`, `gemini-2.5-pro`, `deepseek-chat`).
+  - Injeta automaticamente a flag de modelo no `command` após o binário.
+  - Suportado para `claude`, `gemini` e `deepseek`.
+  - Incompatível com flag de modelo já presente no `command` (`--model`, `--model=...`; e no caso de `deepseek`, também `-m` / `-m=...`).
+  - Validação: aceita somente letras, números, `.`, `_`, `-`, `:` e `/`.
+  - `flow edit`: ao salvar, o campo separado `model` não é preservado; o `command` permanece com o modelo embutido.
 - `instruction` (obrigatório): instrução principal do passo.
 - `input_template` (opcional): template do prompt enviado ao comando. O padrão (default) é `{instruction}\n\n{full_context}`.
 - `style` (opcional): cor do painel Rich.
@@ -232,7 +239,8 @@ Nessa rota, o payload é delimitado automaticamente com:
 
 **Provider DeepSeek via API**:
 
-- Use `command` como `deepseek --model deepseek-chat` (default) ou `deepseek --model deepseek-reasoner`.
+- Recomendado: use `command` como `deepseek` e o campo `model` como `deepseek-chat` (default) ou `deepseek-reasoner`.
+- Alternativa compatível: use `command` com flag explícita (ex.: `deepseek --model deepseek-chat`).
 - Flags opcionais no command: `--temperature`, `--max-tokens`, `--base-url`.
 - Variáveis de ambiente: `DEEPSEEK_API_KEY` (obrigatória) e `DEEPSEEK_API_BASE_URL` (opcional).
 
@@ -255,6 +263,7 @@ O carregamento falha com erro claro quando:
 13. O `command` contém quebras de linha (`\n`, `\r`) ou operadores de shell não permitidos: `|`, `&&`, `;`, `` ` ``, `$(`, `>`, `>>`.
 14. `timeout`, `max_input_chars`, `max_output_chars` ou `max_context_chars` não são inteiros positivos.
 15. `COUNCIL_REQUIRE_FLOW_SIGNATURE` está ativo e o arquivo não possui assinatura válida/confiada.
+16. `model` é usado com binário não suportado, conflita com flags já presentes no `command` ou possui formato inválido.
 
 ## 6.1 Limites Globais por Ambiente
 
@@ -276,6 +285,7 @@ Se qualquer uma dessas variáveis estiver definida com valor inválido (não num
       "agent_name": "Claude",
       "role_desc": "Planejamento",
       "command": "claude -p",
+      "model": "claude-sonnet-4-6",
       "instruction": "Você é um arquiteto. Crie um plano.",
       "input_template": "{instruction}\n\n{user_prompt}",
       "style": "dark_goldenrod"
